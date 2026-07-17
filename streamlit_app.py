@@ -1,244 +1,186 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, datetime, time, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 
-# =========================================================
-# CONFIGURATION
-# =========================================================
+# ---------------------------------------------------------
+# APP SETUP
+# ---------------------------------------------------------
 
-APP_NAME = "FocusFlow"
-APP_TAGLINE = "A smart study planner that turns deadlines into a realistic plan."
-DATABASE_PATH = Path("focusflow.db")
+APP_NAME = "StudyFlow"
+DATABASE_FILE = Path("studyflow.db")
 
-WEEKDAYS = [
-    "Monday", "Tuesday", "Wednesday", "Thursday",
-    "Friday", "Saturday", "Sunday",
+DAYS = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
 ]
 
-PRIORITY_WEIGHT = {
+PRIORITY_POINTS = {
     "Low": 1,
     "Medium": 3,
     "High": 5,
-    "Critical": 7,
 }
-
-TASK_ICONS = {
-    "Homework": "📝",
-    "Exam": "🧠",
-    "Quiz": "❓",
-    "Project": "💻",
-    "Reading": "📖",
-    "Presentation": "🎤",
-    "Other": "📌",
-}
-
-SUBJECT_COLORS = [
-    "#2563EB", "#7C3AED", "#DB2777", "#EA580C",
-    "#059669", "#0891B2", "#4F46E5", "#B45309",
-]
-
 
 st.set_page_config(
-    page_title=f"{APP_NAME} | Smart Study Planner",
-    page_icon="🎓",
+    page_title="StudyFlow",
+    page_icon="📘",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
-# =========================================================
-# PROFESSIONAL STYLING
-# =========================================================
+# ---------------------------------------------------------
+# CLEAN STYLING
+# ---------------------------------------------------------
 
 st.markdown(
     """
     <style>
-        :root {
-            --primary: #4F46E5;
-            --primary-dark: #3730A3;
-            --surface: #FFFFFF;
-            --muted: #64748B;
-            --border: rgba(100, 116, 139, 0.20);
-        }
-
-        .stApp {
-            background:
-                radial-gradient(circle at top left, rgba(79,70,229,0.08), transparent 28rem),
-                radial-gradient(circle at top right, rgba(14,165,233,0.07), transparent 24rem);
-        }
-
         .block-container {
-            max-width: 1450px;
-            padding-top: 1.35rem;
-            padding-bottom: 3.5rem;
+            max-width: 1250px;
+            padding-top: 1.4rem;
+            padding-bottom: 3rem;
         }
 
         [data-testid="stSidebar"] {
-            border-right: 1px solid var(--border);
+            border-right: 1px solid rgba(100, 116, 139, 0.18);
         }
 
-        [data-testid="stSidebar"] .block-container {
-            padding-top: 1.25rem;
-        }
-
-        .brand-card {
-            padding: 1rem 1.05rem;
-            border-radius: 18px;
-            background: linear-gradient(135deg, #4F46E5, #2563EB);
+        .brand {
+            padding: 1rem;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #2563eb, #4f46e5);
             color: white;
-            box-shadow: 0 12px 30px rgba(79,70,229,0.22);
             margin-bottom: 1rem;
         }
 
-        .brand-name {
-            font-size: 1.45rem;
+        .brand-title {
+            font-size: 1.35rem;
             font-weight: 800;
-            margin: 0;
         }
 
-        .brand-caption {
-            opacity: 0.86;
+        .brand-subtitle {
             font-size: 0.82rem;
-            margin-top: 0.25rem;
+            opacity: 0.88;
+            margin-top: 0.2rem;
         }
 
         .hero {
-            padding: 1.35rem 1.5rem;
-            border: 1px solid var(--border);
-            border-radius: 22px;
-            background: rgba(255,255,255,0.72);
-            backdrop-filter: blur(8px);
-            margin-bottom: 1.25rem;
+            padding: 1.3rem 1.4rem;
+            border: 1px solid rgba(100, 116, 139, 0.18);
+            border-radius: 18px;
+            background: rgba(255,255,255,0.78);
+            margin-bottom: 1.2rem;
         }
 
         .hero h1 {
-            font-size: 2.3rem;
-            line-height: 1.1;
+            font-size: 2rem;
             margin: 0;
-            letter-spacing: -0.04em;
         }
 
         .hero p {
-            color: var(--muted);
-            font-size: 1rem;
-            margin: 0.55rem 0 0;
-        }
-
-        .section-title {
-            font-size: 1.25rem;
-            font-weight: 760;
-            margin: 0.2rem 0 0.85rem;
+            color: #64748b;
+            margin: 0.45rem 0 0;
         }
 
         .task-card {
-            border: 1px solid var(--border);
-            border-radius: 16px;
+            padding: 0.9rem 1rem;
+            border: 1px solid rgba(100, 116, 139, 0.18);
+            border-radius: 14px;
             background: rgba(255,255,255,0.82);
-            padding: 0.95rem 1rem;
             margin-bottom: 0.65rem;
-            box-shadow: 0 4px 14px rgba(15,23,42,0.035);
         }
 
-        .task-card:hover {
-            transform: translateY(-1px);
-            transition: 0.15s ease;
-            box-shadow: 0 8px 20px rgba(15,23,42,0.07);
+        .urgent {
+            border-left: 6px solid #ef4444;
         }
 
-        .status-overdue { border-left: 6px solid #B91C1C; }
-        .status-urgent { border-left: 6px solid #EF4444; }
-        .status-soon { border-left: 6px solid #F59E0B; }
-        .status-track { border-left: 6px solid #10B981; }
+        .soon {
+            border-left: 6px solid #f59e0b;
+        }
+
+        .normal {
+            border-left: 6px solid #10b981;
+        }
+
+        .overdue {
+            border-left: 6px solid #991b1b;
+        }
+
+        .task-title {
+            font-weight: 750;
+            font-size: 1rem;
+        }
+
+        .task-meta {
+            color: #64748b;
+            font-size: 0.88rem;
+            margin-top: 0.3rem;
+        }
 
         .badge {
             display: inline-block;
-            padding: 0.22rem 0.52rem;
+            margin-top: 0.45rem;
+            margin-right: 0.25rem;
+            padding: 0.2rem 0.52rem;
             border-radius: 999px;
             font-size: 0.75rem;
             font-weight: 700;
-            margin-right: 0.25rem;
         }
 
-        .badge-red { background: #FEE2E2; color: #991B1B; }
-        .badge-orange { background: #FEF3C7; color: #92400E; }
-        .badge-green { background: #D1FAE5; color: #065F46; }
-        .badge-blue { background: #DBEAFE; color: #1E40AF; }
-        .badge-purple { background: #EDE9FE; color: #5B21B6; }
-        .badge-gray { background: #E2E8F0; color: #334155; }
-
-        .muted {
-            color: var(--muted);
-            font-size: 0.88rem;
+        .red {
+            color: #991b1b;
+            background: #fee2e2;
         }
 
-        .recommendation {
-            padding: 1.1rem 1.15rem;
-            border-radius: 18px;
-            color: white;
-            background: linear-gradient(135deg, #4338CA, #2563EB);
-            box-shadow: 0 14px 34px rgba(37,99,235,0.18);
+        .orange {
+            color: #92400e;
+            background: #fef3c7;
         }
 
-        .recommendation .small {
-            opacity: 0.86;
-            font-size: 0.85rem;
+        .green {
+            color: #065f46;
+            background: #d1fae5;
         }
 
-        .day-card {
-            border: 1px solid var(--border);
+        .blue {
+            color: #1e40af;
+            background: #dbeafe;
+        }
+
+        .gray {
+            color: #334155;
+            background: #e2e8f0;
+        }
+
+        .next-task {
+            padding: 1.1rem;
             border-radius: 16px;
-            background: rgba(255,255,255,0.78);
-            padding: 0.9rem;
-            margin-bottom: 0.7rem;
-        }
-
-        .session-row {
-            padding: 0.65rem 0.72rem;
-            border-radius: 12px;
-            background: rgba(241,245,249,0.80);
-            margin-top: 0.45rem;
-            border: 1px solid rgba(148,163,184,0.18);
+            color: white;
+            background: linear-gradient(135deg, #4338ca, #2563eb);
         }
 
         div[data-testid="stMetric"] {
-            background: rgba(255,255,255,0.76);
-            border: 1px solid var(--border);
-            padding: 0.85rem 0.95rem;
-            border-radius: 16px;
-            box-shadow: 0 4px 14px rgba(15,23,42,0.03);
-        }
-
-        div[data-testid="stMetricLabel"] {
-            color: var(--muted);
+            padding: 0.85rem;
+            border: 1px solid rgba(100, 116, 139, 0.18);
+            border-radius: 14px;
+            background: rgba(255,255,255,0.8);
         }
 
         .stButton > button,
         .stDownloadButton > button {
-            border-radius: 11px;
+            border-radius: 10px;
             font-weight: 650;
-        }
-
-        .stTextInput input,
-        .stNumberInput input,
-        .stDateInput input,
-        .stTimeInput input,
-        .stTextArea textarea {
-            border-radius: 10px;
-        }
-
-        div[data-baseweb="select"] > div {
-            border-radius: 10px;
-        }
-
-        @media (max-width: 800px) {
-            .hero h1 { font-size: 1.8rem; }
-            .block-container { padding-left: 0.8rem; padding-right: 0.8rem; }
         }
     </style>
     """,
@@ -246,12 +188,12 @@ st.markdown(
 )
 
 
-# =========================================================
-# DATABASE LAYER
-# =========================================================
+# ---------------------------------------------------------
+# DATABASE FUNCTIONS
+# ---------------------------------------------------------
 
 def connect() -> sqlite3.Connection:
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(DATABASE_FILE)
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -263,18 +205,11 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS tasks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 subject TEXT NOT NULL,
-                title TEXT NOT NULL,
-                task_type TEXT NOT NULL,
+                task_name TEXT NOT NULL,
                 due_date TEXT NOT NULL,
-                due_time TEXT NOT NULL,
-                estimated_hours REAL NOT NULL,
-                completed_hours REAL NOT NULL DEFAULT 0,
+                hours_needed REAL NOT NULL,
                 priority TEXT NOT NULL,
-                difficulty INTEGER NOT NULL,
-                preferred_session_minutes INTEGER NOT NULL,
-                notes TEXT NOT NULL DEFAULT '',
-                completed INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                completed INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -283,602 +218,249 @@ def initialize_database() -> None:
             """
             CREATE TABLE IF NOT EXISTS availability (
                 day_name TEXT PRIMARY KEY,
-                available_hours REAL NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT NOT NULL
+                study_hours REAL NOT NULL
             )
             """
         )
 
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS settings (
-                setting_key TEXT PRIMARY KEY,
-                setting_value TEXT NOT NULL
-            )
-            """
-        )
-
-        # Upgrade older databases that may not have start/end time columns.
-        availability_columns = {
-            row["name"]
-            for row in connection.execute("PRAGMA table_info(availability)").fetchall()
-        }
-
-        if "start_time" not in availability_columns:
-            connection.execute(
-                "ALTER TABLE availability ADD COLUMN start_time TEXT NOT NULL DEFAULT '16:00'"
-            )
-        if "end_time" not in availability_columns:
-            connection.execute(
-                "ALTER TABLE availability ADD COLUMN end_time TEXT NOT NULL DEFAULT '21:00'"
-            )
-
-        for day_name in WEEKDAYS:
-            default_hours = 3.0 if day_name not in {"Saturday", "Sunday"} else 4.0
-            default_start = "16:00" if day_name not in {"Saturday", "Sunday"} else "10:00"
-            default_end = "21:00" if day_name not in {"Saturday", "Sunday"} else "18:00"
-
+        for day_name in DAYS:
+            default_hours = 2.0 if day_name not in {"Saturday", "Sunday"} else 3.0
             connection.execute(
                 """
-                INSERT OR IGNORE INTO availability
-                    (day_name, available_hours, start_time, end_time)
-                VALUES (?, ?, ?, ?)
-                """,
-                (day_name, default_hours, default_start, default_end),
-            )
-
-        defaults = {
-            "plan_days": "7",
-            "break_minutes": "10",
-            "weekend_enabled": "true",
-        }
-
-        for key, value in defaults.items():
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO settings (setting_key, setting_value)
+                INSERT OR IGNORE INTO availability (day_name, study_hours)
                 VALUES (?, ?)
                 """,
-                (key, value),
+                (day_name, default_hours),
             )
 
 
-def create_task(
+def add_task(
     subject: str,
-    title: str,
-    task_type: str,
-    due_date: date,
-    due_time: time,
-    estimated_hours: float,
+    task_name: str,
+    due_date_value: date,
+    hours_needed: float,
     priority: str,
-    difficulty: int,
-    preferred_session_minutes: int,
-    notes: str,
 ) -> None:
     with connect() as connection:
         connection.execute(
             """
             INSERT INTO tasks (
-                subject, title, task_type, due_date, due_time,
-                estimated_hours, completed_hours, priority,
-                difficulty, preferred_session_minutes, notes,
-                completed, created_at
+                subject,
+                task_name,
+                due_date,
+                hours_needed,
+                priority,
+                completed
             )
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, ?)
+            VALUES (?, ?, ?, ?, ?, 0)
             """,
             (
                 subject.strip(),
-                title.strip(),
-                task_type,
-                due_date.isoformat(),
-                due_time.strftime("%H:%M"),
-                float(estimated_hours),
+                task_name.strip(),
+                due_date_value.isoformat(),
+                float(hours_needed),
                 priority,
-                int(difficulty),
-                int(preferred_session_minutes),
-                notes.strip(),
-                datetime.now().isoformat(timespec="seconds"),
             ),
         )
 
 
-def read_tasks(include_completed: bool = True) -> list[dict]:
-    query = "SELECT * FROM tasks"
-    if not include_completed:
-        query += " WHERE completed = 0"
-    query += " ORDER BY completed ASC, due_date ASC, due_time ASC"
-
+def get_tasks() -> list[dict]:
     with connect() as connection:
-        rows = connection.execute(query).fetchall()
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM tasks
+            ORDER BY completed ASC, due_date ASC
+            """
+        ).fetchall()
 
     return [dict(row) for row in rows]
 
 
-def read_task(task_id: int) -> dict | None:
+def mark_complete(task_id: int) -> None:
     with connect() as connection:
-        row = connection.execute(
-            "SELECT * FROM tasks WHERE id = ?",
+        connection.execute(
+            "UPDATE tasks SET completed = 1 WHERE id = ?",
             (task_id,),
-        ).fetchone()
-
-    return dict(row) if row else None
-
-
-def update_task_progress(task_id: int, completed_hours: float) -> None:
-    task = read_task(task_id)
-    if task is None:
-        return
-
-    safe_hours = max(
-        0.0,
-        min(float(completed_hours), float(task["estimated_hours"])),
-    )
-    is_complete = int(safe_hours >= float(task["estimated_hours"]))
-
-    with connect() as connection:
-        connection.execute(
-            """
-            UPDATE tasks
-            SET completed_hours = ?, completed = ?
-            WHERE id = ?
-            """,
-            (safe_hours, is_complete, task_id),
         )
 
 
-def update_task_details(
-    task_id: int,
-    subject: str,
-    title: str,
-    due_date_value: date,
-    due_time_value: time,
-    priority: str,
-    estimated_hours: float,
-) -> None:
+def reopen_task(task_id: int) -> None:
     with connect() as connection:
         connection.execute(
-            """
-            UPDATE tasks
-            SET subject = ?,
-                title = ?,
-                due_date = ?,
-                due_time = ?,
-                priority = ?,
-                estimated_hours = ?,
-                completed_hours = MIN(completed_hours, ?)
-            WHERE id = ?
-            """,
-            (
-                subject.strip(),
-                title.strip(),
-                due_date_value.isoformat(),
-                due_time_value.strftime("%H:%M"),
-                priority,
-                float(estimated_hours),
-                float(estimated_hours),
-                task_id,
-            ),
+            "UPDATE tasks SET completed = 0 WHERE id = ?",
+            (task_id,),
         )
 
 
-def set_task_completed(task_id: int, completed: bool) -> None:
-    task = read_task(task_id)
-    if task is None:
-        return
-
-    completed_hours = (
-        float(task["estimated_hours"])
-        if completed
-        else min(float(task["completed_hours"]), float(task["estimated_hours"]) - 0.5)
-    )
-    completed_hours = max(0.0, completed_hours)
-
+def delete_task(task_id: int) -> None:
     with connect() as connection:
         connection.execute(
-            """
-            UPDATE tasks
-            SET completed = ?, completed_hours = ?
-            WHERE id = ?
-            """,
-            (int(completed), completed_hours, task_id),
+            "DELETE FROM tasks WHERE id = ?",
+            (task_id,),
         )
 
 
-def remove_task(task_id: int) -> None:
-    with connect() as connection:
-        connection.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
-
-
-def read_availability() -> dict[str, dict]:
+def get_availability() -> dict[str, float]:
     with connect() as connection:
         rows = connection.execute(
-            """
-            SELECT day_name, available_hours, start_time, end_time
-            FROM availability
-            """
+            "SELECT day_name, study_hours FROM availability"
         ).fetchall()
 
-    result = {
-        row["day_name"]: {
-            "hours": float(row["available_hours"]),
-            "start": row["start_time"],
-            "end": row["end_time"],
-        }
+    saved = {
+        row["day_name"]: float(row["study_hours"])
         for row in rows
     }
 
     return {
-        day: result.get(
-            day,
-            {"hours": 0.0, "start": "16:00", "end": "21:00"},
-        )
-        for day in WEEKDAYS
+        day_name: saved.get(day_name, 0.0)
+        for day_name in DAYS
     }
 
 
-def save_availability(values: dict[str, dict]) -> None:
+def save_availability(availability: dict[str, float]) -> None:
     with connect() as connection:
-        for day_name, data in values.items():
+        for day_name, hours in availability.items():
             connection.execute(
                 """
-                INSERT INTO availability
-                    (day_name, available_hours, start_time, end_time)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO availability (day_name, study_hours)
+                VALUES (?, ?)
                 ON CONFLICT(day_name)
-                DO UPDATE SET
-                    available_hours = excluded.available_hours,
-                    start_time = excluded.start_time,
-                    end_time = excluded.end_time
+                DO UPDATE SET study_hours = excluded.study_hours
                 """,
-                (
-                    day_name,
-                    float(data["hours"]),
-                    data["start"],
-                    data["end"],
-                ),
+                (day_name, float(hours)),
             )
 
 
-def get_setting(key: str, fallback: str) -> str:
-    with connect() as connection:
-        row = connection.execute(
-            "SELECT setting_value FROM settings WHERE setting_key = ?",
-            (key,),
-        ).fetchone()
+# ---------------------------------------------------------
+# SMART PLANNER LOGIC
+# ---------------------------------------------------------
 
-    return str(row["setting_value"]) if row else fallback
-
-
-def set_setting(key: str, value: str) -> None:
-    with connect() as connection:
-        connection.execute(
-            """
-            INSERT INTO settings (setting_key, setting_value)
-            VALUES (?, ?)
-            ON CONFLICT(setting_key)
-            DO UPDATE SET setting_value = excluded.setting_value
-            """,
-            (key, str(value)),
-        )
-
-
-# =========================================================
-# SMART LOGIC
-# =========================================================
-
-def deadline_datetime(task: dict) -> datetime:
+def days_remaining(task: dict) -> int:
     due_date_value = date.fromisoformat(task["due_date"])
-    due_time_value = time.fromisoformat(task["due_time"])
-    return datetime.combine(due_date_value, due_time_value)
+    return (due_date_value - date.today()).days
 
 
-def task_hours_left(task: dict) -> float:
-    return max(
-        0.0,
-        float(task["estimated_hours"]) - float(task["completed_hours"]),
-    )
+def urgency(task: dict) -> tuple[str, str, str]:
+    days_left = days_remaining(task)
+
+    if days_left < 0:
+        return "Overdue", "overdue", "red"
+    if days_left <= 1:
+        return "Urgent", "urgent", "red"
+    if days_left <= 3:
+        return "Due soon", "soon", "orange"
+    return "On track", "normal", "green"
 
 
-def days_left(task: dict) -> float:
-    return (
-        deadline_datetime(task) - datetime.now()
-    ).total_seconds() / 86400
+def smart_score(task: dict) -> float:
+    days_left = days_remaining(task)
 
-
-def urgency_info(task: dict) -> dict:
-    remaining_days = days_left(task)
-
-    if remaining_days < 0:
-        return {
-            "label": "Overdue",
-            "icon": "⛔",
-            "css": "status-overdue",
-            "badge": "badge-red",
-        }
-
-    if remaining_days <= 1:
-        return {
-            "label": "Urgent",
-            "icon": "🔴",
-            "css": "status-urgent",
-            "badge": "badge-red",
-        }
-
-    if remaining_days <= 3:
-        return {
-            "label": "Due soon",
-            "icon": "🟠",
-            "css": "status-soon",
-            "badge": "badge-orange",
-        }
-
-    return {
-        "label": "On track",
-        "icon": "🟢",
-        "css": "status-track",
-        "badge": "badge-green",
-    }
-
-
-def calculate_smart_score(task: dict) -> float:
-    """
-    Scores tasks using deadline urgency, priority, difficulty,
-    remaining workload, and the amount of time left.
-    """
-
-    remaining_days = days_left(task)
-    remaining_hours = task_hours_left(task)
-
-    if remaining_days < 0:
-        deadline_score = 36
+    if days_left < 0:
+        urgency_score = 20
     else:
-        deadline_score = 22 / (remaining_days + 0.75)
+        urgency_score = 10 / (days_left + 1)
 
-    priority_score = PRIORITY_WEIGHT.get(task["priority"], 3) * 3.25
-    difficulty_score = int(task["difficulty"]) * 1.35
-    pressure_score = remaining_hours / max(remaining_days, 0.5) * 3
+    priority_score = PRIORITY_POINTS[task["priority"]] * 2
+    workload_score = float(task["hours_needed"]) * 0.5
 
-    return round(
-        deadline_score + priority_score + difficulty_score + pressure_score,
-        2,
-    )
+    return round(urgency_score + priority_score + workload_score, 2)
 
 
-def recommendation_reason(task: dict) -> str:
-    reasons: list[str] = []
-    remaining_days = days_left(task)
-
-    if remaining_days < 0:
-        reasons.append("it is overdue")
-    elif remaining_days <= 1:
-        reasons.append("the deadline is within 24 hours")
-    elif remaining_days <= 3:
-        reasons.append("the deadline is approaching")
-
-    if task["priority"] in {"High", "Critical"}:
-        reasons.append(f"it has {task['priority'].lower()} priority")
-
-    if int(task["difficulty"]) >= 4:
-        reasons.append("it is difficult")
-
-    if task_hours_left(task) >= 5:
-        reasons.append("it has a large remaining workload")
-
-    if not reasons:
-        reasons.append("starting early will prevent last-minute work")
-
-    return "; ".join(reasons).capitalize()
-
-
-def next_rounded_time(current: datetime) -> datetime:
-    if current.minute == 0:
-        return current.replace(second=0, microsecond=0)
-
-    rounded_hour = current.replace(minute=0, second=0, microsecond=0)
-    return rounded_hour + timedelta(hours=1)
-
-
-def build_smart_timetable(
+def generate_weekly_plan(
     tasks: list[dict],
-    availability: dict[str, dict],
-    plan_days: int,
-    break_minutes: int,
+    availability: dict[str, float],
 ) -> tuple[list[dict], list[str]]:
     today = date.today()
-    final_date = today + timedelta(days=plan_days - 1)
-    now = datetime.now()
+    plan_dates = [today + timedelta(days=offset) for offset in range(7)]
+
+    available_hours = {
+        plan_date: availability[plan_date.strftime("%A")]
+        for plan_date in plan_dates
+    }
 
     active_tasks = [
         task.copy()
         for task in tasks
-        if not bool(task["completed"]) and task_hours_left(task) > 0
+        if not task["completed"]
     ]
 
     for task in active_tasks:
-        task["_minutes_left"] = int(round(task_hours_left(task) * 60))
-        task["_score"] = calculate_smart_score(task)
+        task["remaining_hours"] = float(task["hours_needed"])
+        task["score"] = smart_score(task)
 
     active_tasks.sort(
-        key=lambda task: (-task["_score"], deadline_datetime(task))
+        key=lambda task: (-task["score"], task["due_date"])
     )
-
-    dates: list[date] = []
-    current_date = today
-    while current_date <= final_date:
-        dates.append(current_date)
-        current_date += timedelta(days=1)
-
-    capacity: dict[date, int] = {}
-    next_time: dict[date, datetime] = {}
-    hard_end: dict[date, datetime] = {}
-
-    for day_date in dates:
-        weekday = day_date.strftime("%A")
-        day_settings = availability[weekday]
-
-        start_clock = time.fromisoformat(day_settings["start"])
-        end_clock = time.fromisoformat(day_settings["end"])
-
-        start_dt = datetime.combine(day_date, start_clock)
-        end_dt = datetime.combine(day_date, end_clock)
-
-        if day_date == today:
-            start_dt = max(start_dt, next_rounded_time(now))
-
-        window_minutes = max(
-            0,
-            int((end_dt - start_dt).total_seconds() // 60),
-        )
-        declared_minutes = int(round(day_settings["hours"] * 60))
-
-        capacity[day_date] = min(window_minutes, declared_minutes)
-        next_time[day_date] = start_dt
-        hard_end[day_date] = end_dt
 
     schedule: list[dict] = []
     warnings: list[str] = []
 
     for task in active_tasks:
-        due_dt = deadline_datetime(task)
-        preferred = max(
-            25,
-            min(int(task["preferred_session_minutes"]), 120),
-        )
+        due_date_value = date.fromisoformat(task["due_date"])
 
-        if due_dt.date() < today:
-            eligible_dates = dates
+        if due_date_value < today:
+            allowed_dates = plan_dates
         else:
-            eligible_dates = [
-                day_date
-                for day_date in dates
-                if day_date <= due_dt.date()
+            allowed_dates = [
+                plan_date
+                for plan_date in plan_dates
+                if plan_date <= due_date_value
             ]
 
-        while task["_minutes_left"] > 0:
+        while task["remaining_hours"] > 0:
             possible_dates = [
-                day_date
-                for day_date in eligible_dates
-                if capacity[day_date] >= 25
+                plan_date
+                for plan_date in allowed_dates
+                if available_hours[plan_date] > 0
             ]
 
             if not possible_dates:
                 break
 
-            # Balance urgency with workload distribution:
-            # prefer earlier days, then days with more remaining capacity.
-            chosen_date = min(
-                possible_dates,
-                key=lambda day_date: (
-                    (day_date - today).days,
-                    -capacity[day_date],
-                ),
+            chosen_date = possible_dates[0]
+
+            session_hours = min(
+                1.0,
+                task["remaining_hours"],
+                available_hours[chosen_date],
             )
-
-            session_minutes = min(
-                preferred,
-                task["_minutes_left"],
-                capacity[chosen_date],
-            )
-
-            if session_minutes < 25 and task["_minutes_left"] >= 25:
-                capacity[chosen_date] = 0
-                continue
-
-            start_dt = next_time[chosen_date]
-            end_dt = start_dt + timedelta(minutes=session_minutes)
-
-            if end_dt > hard_end[chosen_date]:
-                capacity[chosen_date] = 0
-                continue
-
-            urgency = urgency_info(task)
 
             schedule.append(
                 {
                     "Date": chosen_date,
                     "Day": chosen_date.strftime("%A"),
-                    "Start": start_dt.strftime("%I:%M %p").lstrip("0"),
-                    "End": end_dt.strftime("%I:%M %p").lstrip("0"),
                     "Subject": task["subject"],
-                    "Task": task["title"],
-                    "Type": task["task_type"],
-                    "Minutes": session_minutes,
-                    "Study Time": f"{session_minutes / 60:.1f} hr",
+                    "Task": task["task_name"],
+                    "Study Time": f"{session_hours:.1f} hr",
                     "Priority": task["priority"],
-                    "Urgency": urgency["label"],
-                    "Reason": recommendation_reason(task),
-                    "Task ID": task["id"],
-                    "Smart Score": task["_score"],
+                    "Status": urgency(task)[0],
                 }
             )
 
-            task["_minutes_left"] -= session_minutes
-            capacity[chosen_date] -= session_minutes
+            task["remaining_hours"] -= session_hours
+            available_hours[chosen_date] -= session_hours
 
-            break_end = end_dt + timedelta(minutes=break_minutes)
-            next_time[chosen_date] = min(break_end, hard_end[chosen_date])
-
-            # Breaks consume part of the real time window but not declared study hours.
-            if next_time[chosen_date] >= hard_end[chosen_date]:
-                capacity[chosen_date] = 0
-
-        if task["_minutes_left"] > 0:
+        if task["remaining_hours"] > 0:
             warnings.append(
-                f"{task['subject']} — {task['title']} still needs "
-                f"{task['_minutes_left'] / 60:.1f} unscheduled hour(s)."
+                f"{task['subject']} — {task['task_name']} still needs "
+                f"{task['remaining_hours']:.1f} hour(s)."
             )
 
-    schedule.sort(
-        key=lambda session: (
-            session["Date"],
-            datetime.strptime(session["Start"], "%I:%M %p").time(),
-        )
-    )
-
+    schedule.sort(key=lambda row: row["Date"])
     return schedule, warnings
 
 
-def task_table(tasks: list[dict]) -> pd.DataFrame:
-    rows = []
+# ---------------------------------------------------------
+# UI HELPERS
+# ---------------------------------------------------------
 
-    for task in tasks:
-        urgency = urgency_info(task)
-        estimated = float(task["estimated_hours"])
-        completed = float(task["completed_hours"])
-        progress = completed / estimated if estimated else 0
-
-        rows.append(
-            {
-                "ID": task["id"],
-                "Status": "Completed" if task["completed"] else urgency["label"],
-                "Subject": task["subject"],
-                "Task": task["title"],
-                "Type": task["task_type"],
-                "Deadline": deadline_datetime(task).strftime(
-                    "%b %d, %Y · %I:%M %p"
-                ),
-                "Priority": task["priority"],
-                "Difficulty": f"{task['difficulty']}/5",
-                "Hours Left": round(task_hours_left(task), 1),
-                "Progress": f"{progress * 100:.0f}%",
-                "Smart Score": calculate_smart_score(task),
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-# =========================================================
-# SHARED UI COMPONENTS
-# =========================================================
-
-def render_hero() -> None:
+def render_header() -> None:
     st.markdown(
-        f"""
+        """
         <div class="hero">
-            <h1>Plan smarter. Study with purpose.</h1>
-            <p>{APP_TAGLINE}</p>
+            <h1>📘 StudyFlow</h1>
+            <p>Add your tasks, set your available hours, and get a realistic weekly study plan.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -886,118 +468,83 @@ def render_hero() -> None:
 
 
 def render_task_card(task: dict) -> None:
-    urgency = urgency_info(task)
-    deadline = deadline_datetime(task).strftime("%a, %b %d at %I:%M %p")
-    task_icon = TASK_ICONS.get(task["task_type"], "📌")
-
-    priority_badge = (
-        "badge-red"
-        if task["priority"] == "Critical"
-        else "badge-orange"
-        if task["priority"] == "High"
-        else "badge-blue"
-    )
+    label, card_class, badge_class = urgency(task)
+    due_date_text = date.fromisoformat(task["due_date"]).strftime("%b %d, %Y")
 
     st.markdown(
         f"""
-        <div class="task-card {urgency['css']}">
-            <div style="font-size:1.02rem;font-weight:760;">
-                {task_icon} {task["subject"]}: {task["title"]}
+        <div class="task-card {card_class}">
+            <div class="task-title">
+                {task["subject"]}: {task["task_name"]}
             </div>
-            <div style="margin-top:0.45rem;">
-                <span class="badge {urgency['badge']}">
-                    {urgency['icon']} {urgency['label']}
-                </span>
-                <span class="badge {priority_badge}">
-                    {task["priority"]} priority
-                </span>
-                <span class="badge badge-gray">
-                    {task_hours_left(task):.1f} hours left
-                </span>
+            <div class="task-meta">
+                Due {due_date_text} · {task["hours_needed"]:.1f} study hours
             </div>
-            <div class="muted" style="margin-top:0.55rem;">
-                Due {deadline} · Difficulty {task["difficulty"]}/5
-            </div>
+            <span class="badge {badge_class}">{label}</span>
+            <span class="badge blue">{task["priority"]} priority</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-# =========================================================
+# ---------------------------------------------------------
 # PAGES
-# =========================================================
+# ---------------------------------------------------------
 
-def dashboard_page(tasks: list[dict], availability: dict[str, dict]) -> None:
-    active = [task for task in tasks if not task["completed"]]
-    completed = [task for task in tasks if task["completed"]]
-
-    urgent_or_overdue = [
-        task for task in active if days_left(task) <= 1
+def dashboard_page(tasks: list[dict], availability: dict[str, float]) -> None:
+    active_tasks = [task for task in tasks if not task["completed"]]
+    completed_tasks = [task for task in tasks if task["completed"]]
+    urgent_tasks = [
+        task for task in active_tasks
+        if days_remaining(task) <= 1
     ]
-    total_hours_left = sum(task_hours_left(task) for task in active)
-    weekly_capacity = sum(day["hours"] for day in availability.values())
 
-    st.markdown('<div class="section-title">Overview</div>', unsafe_allow_html=True)
+    remaining_hours = sum(
+        float(task["hours_needed"])
+        for task in active_tasks
+    )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Active tasks", len(active))
-    c2.metric("Hours remaining", f"{total_hours_left:.1f}")
-    c3.metric("Urgent / overdue", len(urgent_or_overdue))
-    c4.metric("Weekly capacity", f"{weekly_capacity:.1f} hr")
+    weekly_hours = sum(availability.values())
+
+    st.subheader("Dashboard")
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Active tasks", len(active_tasks))
+    m2.metric("Study hours needed", f"{remaining_hours:.1f}")
+    m3.metric("Urgent / overdue", len(urgent_tasks))
+    m4.metric("Weekly availability", f"{weekly_hours:.1f} hr")
 
     if tasks:
-        completion_rate = len(completed) / len(tasks)
-        st.caption("Overall completion")
-        st.progress(completion_rate)
-        st.caption(
-            f"{len(completed)} of {len(tasks)} tasks completed "
-            f"({completion_rate * 100:.0f}%)"
-        )
-
-    if urgent_or_overdue:
-        overdue_count = sum(1 for task in urgent_or_overdue if days_left(task) < 0)
-        if overdue_count:
-            st.error(
-                f"{overdue_count} task(s) are overdue. "
-                "Open the Smart Timetable to schedule recovery sessions."
-            )
-        else:
-            st.warning(
-                f"{len(urgent_or_overdue)} task(s) are due within 24 hours."
-            )
-    elif active:
-        st.success("You are currently clear of urgent and overdue work.")
+        completion = len(completed_tasks) / len(tasks)
+        st.caption("Task completion")
+        st.progress(completion)
+        st.caption(f"{completion * 100:.0f}% completed")
 
     st.divider()
 
-    left, right = st.columns([1.15, 1])
+    left, right = st.columns([1.1, 1])
 
     with left:
-        st.markdown(
-            '<div class="section-title">Best next action</div>',
-            unsafe_allow_html=True,
-        )
+        st.subheader("What should I study next?")
 
-        if not active:
-            st.info("Add a task to receive a smart recommendation.")
+        if not active_tasks:
+            st.info("Add a task to receive a recommendation.")
         else:
-            best_task = max(active, key=calculate_smart_score)
-            icon = TASK_ICONS.get(best_task["task_type"], "📌")
+            best_task = max(active_tasks, key=smart_score)
 
             st.markdown(
                 f"""
-                <div class="recommendation">
-                    <div class="small">RECOMMENDED NEXT</div>
-                    <div style="font-size:1.35rem;font-weight:800;margin-top:0.3rem;">
-                        {icon} {best_task["subject"]}: {best_task["title"]}
+                <div class="next-task">
+                    <div style="font-size:0.8rem;opacity:0.85;">
+                        RECOMMENDED NEXT
                     </div>
-                    <div style="margin-top:0.55rem;">
-                        {recommendation_reason(best_task)}.
+                    <div style="font-size:1.25rem;font-weight:800;margin-top:0.3rem;">
+                        {best_task["subject"]}: {best_task["task_name"]}
                     </div>
-                    <div class="small" style="margin-top:0.7rem;">
-                        Smart score {calculate_smart_score(best_task)} ·
-                        {task_hours_left(best_task):.1f} hours remaining
+                    <div style="margin-top:0.45rem;">
+                        Due {date.fromisoformat(best_task["due_date"]).strftime("%b %d")}
+                        · {best_task["priority"]} priority
                     </div>
                 </div>
                 """,
@@ -1005,114 +552,60 @@ def dashboard_page(tasks: list[dict], availability: dict[str, dict]) -> None:
             )
 
     with right:
-        st.markdown(
-            '<div class="section-title">Workload by subject</div>',
-            unsafe_allow_html=True,
-        )
-
-        if not active:
-            st.info("No active workload to display.")
-        else:
-            workload: dict[str, float] = {}
-            for task in active:
-                workload[task["subject"]] = (
-                    workload.get(task["subject"], 0.0)
-                    + task_hours_left(task)
-                )
-
-            chart_data = (
-                pd.DataFrame(
-                    {
-                        "Subject": list(workload.keys()),
-                        "Hours": list(workload.values()),
-                    }
-                )
-                .sort_values("Hours", ascending=False)
-                .set_index("Subject")
-            )
-            st.bar_chart(chart_data)
+        st.subheader("How to use the app")
+        st.write("**1.** Add your assignments and exams.")
+        st.write("**2.** Set the hours you can study each day.")
+        st.write("**3.** Open Study Plan to see your timetable.")
+        st.write("**4.** Mark tasks complete when finished.")
 
     st.divider()
-    st.markdown(
-        '<div class="section-title">Upcoming deadlines</div>',
-        unsafe_allow_html=True,
-    )
+    st.subheader("Upcoming tasks")
 
-    if not active:
-        st.info("No active deadlines.")
+    if not active_tasks:
+        st.info("No active tasks.")
     else:
-        for task in sorted(active, key=deadline_datetime)[:7]:
+        for task in sorted(
+            active_tasks,
+            key=lambda item: item["due_date"],
+        )[:6]:
             render_task_card(task)
 
 
 def add_task_page() -> None:
-    st.markdown(
-        '<div class="section-title">Create a study task</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "The more accurate your deadline and estimated hours are, "
-        "the more realistic the timetable will be."
-    )
+    st.subheader("Add a Task")
+    st.caption("Enter only the information needed to build your schedule.")
 
-    with st.form("new_task_form", clear_on_submit=True):
+    with st.form("add_task_form", clear_on_submit=True):
         left, right = st.columns(2)
 
         with left:
             subject = st.text_input(
-                "Subject *",
-                placeholder="Example: Mathematics",
+                "Subject",
+                placeholder="Example: Math",
             )
-            title = st.text_input(
-                "Task name *",
-                placeholder="Example: Prepare for Chapter 5 exam",
-            )
-            task_type = st.selectbox(
-                "Task type",
-                list(TASK_ICONS.keys()),
+            task_name = st.text_input(
+                "Task name",
+                placeholder="Example: Study for Chapter 5 test",
             )
             priority = st.selectbox(
                 "Priority",
-                ["Low", "Medium", "High", "Critical"],
+                ["Low", "Medium", "High"],
                 index=1,
             )
 
         with right:
             due_date_value = st.date_input(
-                "Deadline date",
+                "Deadline",
                 value=date.today() + timedelta(days=3),
                 min_value=date.today(),
             )
-            due_time_value = st.time_input(
-                "Deadline time",
-                value=time(23, 59),
-            )
-            estimated_hours = st.number_input(
-                "Estimated study hours",
+            hours_needed = st.number_input(
+                "Study hours needed",
                 min_value=0.5,
-                max_value=100.0,
+                max_value=40.0,
                 value=2.0,
                 step=0.5,
             )
-            preferred_session = st.select_slider(
-                "Preferred session length",
-                options=[25, 30, 45, 60, 90, 120],
-                value=60,
-                format_func=lambda minutes: f"{minutes} minutes",
-            )
-
-        difficulty = st.slider(
-            "Difficulty",
-            1,
-            5,
-            3,
-            help="Harder tasks receive slightly more scheduling priority.",
-        )
-
-        notes = st.text_area(
-            "Notes",
-            placeholder="Topics to review, materials needed, teacher instructions, etc.",
-        )
 
         submitted = st.form_submit_button(
             "Add task",
@@ -1121,589 +614,267 @@ def add_task_page() -> None:
         )
 
     if submitted:
-        if not subject.strip() or not title.strip():
-            st.error("Enter both a subject and a task name.")
+        if not subject.strip() or not task_name.strip():
+            st.error("Enter both a subject and task name.")
         else:
-            create_task(
+            add_task(
                 subject=subject,
-                title=title,
-                task_type=task_type,
-                due_date=due_date_value,
-                due_time=due_time_value,
-                estimated_hours=estimated_hours,
+                task_name=task_name,
+                due_date_value=due_date_value,
+                hours_needed=hours_needed,
                 priority=priority,
-                difficulty=difficulty,
-                preferred_session_minutes=preferred_session,
-                notes=notes,
             )
             st.success("Task added successfully.")
 
 
-def manage_tasks_page(tasks: list[dict]) -> None:
-    st.markdown(
-        '<div class="section-title">Task manager</div>',
-        unsafe_allow_html=True,
-    )
+def my_tasks_page(tasks: list[dict]) -> None:
+    st.subheader("My Tasks")
 
     if not tasks:
-        st.info("You have not added any tasks yet.")
+        st.info("No tasks have been added yet.")
         return
 
-    f1, f2, f3 = st.columns([1, 1, 1.2])
+    status_filter = st.selectbox(
+        "Show",
+        ["Active tasks", "Completed tasks", "All tasks"],
+    )
 
-    with f1:
-        status_filter = st.selectbox(
-            "Status",
-            ["Active", "Completed", "All"],
-        )
-
-    with f2:
-        sort_option = st.selectbox(
-            "Sort by",
-            ["Deadline", "Smart score", "Subject", "Priority"],
-        )
-
-    with f3:
-        subject_options = ["All subjects"] + sorted(
-            {task["subject"] for task in tasks}
-        )
-        subject_filter = st.selectbox("Subject", subject_options)
-
-    filtered = tasks.copy()
-
-    if status_filter == "Active":
-        filtered = [task for task in filtered if not task["completed"]]
-    elif status_filter == "Completed":
-        filtered = [task for task in filtered if task["completed"]]
-
-    if subject_filter != "All subjects":
-        filtered = [
-            task for task in filtered
-            if task["subject"] == subject_filter
+    if status_filter == "Active tasks":
+        filtered_tasks = [
+            task for task in tasks if not task["completed"]
         ]
-
-    if sort_option == "Deadline":
-        filtered.sort(key=deadline_datetime)
-    elif sort_option == "Smart score":
-        filtered.sort(key=calculate_smart_score, reverse=True)
-    elif sort_option == "Subject":
-        filtered.sort(key=lambda task: task["subject"].lower())
+    elif status_filter == "Completed tasks":
+        filtered_tasks = [
+            task for task in tasks if task["completed"]
+        ]
     else:
-        filtered.sort(
-            key=lambda task: PRIORITY_WEIGHT.get(task["priority"], 0),
-            reverse=True,
-        )
+        filtered_tasks = tasks
 
-    if not filtered:
-        st.info("No tasks match the selected filters.")
+    if not filtered_tasks:
+        st.info("No tasks match this filter.")
         return
+
+    rows = []
+
+    for task in filtered_tasks:
+        rows.append(
+            {
+                "Subject": task["subject"],
+                "Task": task["task_name"],
+                "Deadline": date.fromisoformat(
+                    task["due_date"]
+                ).strftime("%b %d, %Y"),
+                "Hours": task["hours_needed"],
+                "Priority": task["priority"],
+                "Status": (
+                    "Completed"
+                    if task["completed"]
+                    else urgency(task)[0]
+                ),
+            }
+        )
 
     st.dataframe(
-        task_table(filtered),
+        pd.DataFrame(rows),
         use_container_width=True,
         hide_index=True,
     )
 
     st.divider()
-    st.markdown(
-        '<div class="section-title">Edit selected task</div>',
-        unsafe_allow_html=True,
-    )
+    st.subheader("Update a Task")
 
-    task_lookup = {
-        f"#{task['id']} — {task['subject']}: {task['title']}": task["id"]
-        for task in filtered
+    task_options = {
+        f"{task['subject']}: {task['task_name']}": task["id"]
+        for task in filtered_tasks
     }
+
     selected_label = st.selectbox(
         "Choose a task",
-        list(task_lookup.keys()),
+        list(task_options.keys()),
     )
-    task_id = task_lookup[selected_label]
-    selected = read_task(task_id)
+    selected_id = task_options[selected_label]
 
-    if selected is None:
-        st.error("Task could not be loaded.")
-        return
+    c1, c2, c3 = st.columns(3)
 
-    progress_fraction = (
-        float(selected["completed_hours"])
-        / float(selected["estimated_hours"])
-    )
-    st.progress(min(progress_fraction, 1.0))
+    with c1:
+        if st.button("Mark complete", use_container_width=True):
+            mark_complete(selected_id)
+            st.success("Task completed.")
+            st.rerun()
+
+    with c2:
+        if st.button("Reopen task", use_container_width=True):
+            reopen_task(selected_id)
+            st.success("Task reopened.")
+            st.rerun()
+
+    with c3:
+        if st.button("Delete task", use_container_width=True):
+            delete_task(selected_id)
+            st.success("Task deleted.")
+            st.rerun()
+
+
+def study_plan_page(
+    tasks: list[dict],
+    availability: dict[str, float],
+) -> None:
+    st.subheader("Study Plan")
     st.caption(
-        f"{selected['completed_hours']:.1f} of "
-        f"{selected['estimated_hours']:.1f} study hours completed"
+        "Set your available hours, then the app will build a seven-day timetable."
     )
 
-    tab_progress, tab_details = st.tabs(["Progress", "Task details"])
+    with st.expander("Set available study hours", expanded=True):
+        with st.form("availability_form"):
+            updated_hours: dict[str, float] = {}
 
-    with tab_progress:
-        new_completed_hours = st.number_input(
-            "Completed study hours",
-            min_value=0.0,
-            max_value=float(selected["estimated_hours"]),
-            value=float(selected["completed_hours"]),
-            step=0.5,
-        )
+            left, right = st.columns(2)
 
-        b1, b2, b3, b4 = st.columns(4)
+            for index, day_name in enumerate(DAYS):
+                target = left if index < 4 else right
 
-        with b1:
-            if st.button("Save progress", use_container_width=True):
-                update_task_progress(task_id, new_completed_hours)
-                st.success("Progress saved.")
-                st.rerun()
+                with target:
+                    updated_hours[day_name] = st.slider(
+                        day_name,
+                        min_value=0.0,
+                        max_value=8.0,
+                        value=float(availability[day_name]),
+                        step=0.5,
+                    )
 
-        with b2:
-            if st.button("Mark complete", use_container_width=True):
-                set_task_completed(task_id, True)
-                st.success("Task completed.")
-                st.rerun()
-
-        with b3:
-            if st.button("Reopen", use_container_width=True):
-                set_task_completed(task_id, False)
-                st.success("Task reopened.")
-                st.rerun()
-
-        with b4:
-            if st.button("Delete", use_container_width=True):
-                remove_task(task_id)
-                st.success("Task deleted.")
-                st.rerun()
-
-    with tab_details:
-        with st.form("edit_task_form"):
-            e1, e2 = st.columns(2)
-
-            with e1:
-                edited_subject = st.text_input(
-                    "Subject",
-                    value=selected["subject"],
-                )
-                edited_title = st.text_input(
-                    "Task name",
-                    value=selected["title"],
-                )
-                edited_priority = st.selectbox(
-                    "Priority",
-                    ["Low", "Medium", "High", "Critical"],
-                    index=["Low", "Medium", "High", "Critical"].index(
-                        selected["priority"]
-                    ),
-                )
-
-            with e2:
-                edited_due_date = st.date_input(
-                    "Deadline date",
-                    value=date.fromisoformat(selected["due_date"]),
-                )
-                edited_due_time = st.time_input(
-                    "Deadline time",
-                    value=time.fromisoformat(selected["due_time"]),
-                )
-                edited_hours = st.number_input(
-                    "Estimated hours",
-                    min_value=0.5,
-                    max_value=100.0,
-                    value=float(selected["estimated_hours"]),
-                    step=0.5,
-                )
-
-            save_edits = st.form_submit_button(
-                "Save task details",
+            save_hours = st.form_submit_button(
+                "Save available hours",
                 type="primary",
                 use_container_width=True,
             )
 
-        if save_edits:
-            if not edited_subject.strip() or not edited_title.strip():
-                st.error("Subject and task name cannot be empty.")
-            else:
-                update_task_details(
-                    task_id=task_id,
-                    subject=edited_subject,
-                    title=edited_title,
-                    due_date_value=edited_due_date,
-                    due_time_value=edited_due_time,
-                    priority=edited_priority,
-                    estimated_hours=edited_hours,
-                )
-                st.success("Task details updated.")
-                st.rerun()
+        if save_hours:
+            save_availability(updated_hours)
+            st.success("Available hours saved.")
+            st.rerun()
 
-    if selected["notes"]:
-        st.info(f"Notes: {selected['notes']}")
+    active_tasks = [
+        task for task in tasks if not task["completed"]
+    ]
 
-
-def timetable_page(
-    tasks: list[dict],
-    availability: dict[str, dict],
-) -> None:
-    st.markdown(
-        '<div class="section-title">Smart timetable generator</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "The planner ranks tasks by urgency, priority, difficulty, "
-        "and remaining workload, then fits sessions into your available hours."
-    )
-
-    current_plan_days = int(get_setting("plan_days", "7"))
-    current_break = int(get_setting("break_minutes", "10"))
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        plan_days = st.select_slider(
-            "Planning horizon",
-            options=[7, 10, 14, 21],
-            value=current_plan_days
-            if current_plan_days in [7, 10, 14, 21]
-            else 7,
-            format_func=lambda value: f"{value} days",
-        )
-
-    with c2:
-        break_minutes = st.select_slider(
-            "Break between sessions",
-            options=[0, 5, 10, 15, 20, 30],
-            value=current_break
-            if current_break in [0, 5, 10, 15, 20, 30]
-            else 10,
-            format_func=lambda value: f"{value} minutes",
-        )
-
-    set_setting("plan_days", str(plan_days))
-    set_setting("break_minutes", str(break_minutes))
-
-    active = [task for task in tasks if not task["completed"]]
-
-    if not active:
-        st.info("Add at least one active task to generate a timetable.")
+    if not active_tasks:
+        st.info("Add at least one active task to generate a plan.")
         return
 
-    schedule, warnings = build_smart_timetable(
-        tasks=tasks,
-        availability=availability,
-        plan_days=plan_days,
-        break_minutes=break_minutes,
+    schedule, warnings = generate_weekly_plan(
+        tasks,
+        availability,
     )
 
     if not schedule:
         st.warning(
-            "No study sessions could be scheduled. "
-            "Increase your available hours or change your study windows."
+            "No sessions could be scheduled. Add available study hours."
         )
         return
 
-    total_minutes = sum(item["Minutes"] for item in schedule)
-    covered_tasks = {item["Task ID"] for item in schedule}
-    scheduled_days = {item["Date"] for item in schedule}
-
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Study sessions", len(schedule))
-    m2.metric("Scheduled hours", f"{total_minutes / 60:.1f}")
-    m3.metric("Tasks included", len(covered_tasks))
-    m4.metric("Study days", len(scheduled_days))
-
-    schedule_df = pd.DataFrame(schedule)
-    export_df = schedule_df.copy()
-    export_df["Date"] = pd.to_datetime(export_df["Date"]).dt.strftime(
-        "%Y-%m-%d"
+    total_hours = sum(
+        float(row["Study Time"].replace(" hr", ""))
+        for row in schedule
     )
 
-    display_columns = [
-        "Date", "Day", "Start", "End", "Subject", "Task",
-        "Study Time", "Priority", "Urgency", "Reason",
-    ]
-
-    table_df = export_df[display_columns].copy()
-    table_df["Date"] = pd.to_datetime(table_df["Date"]).dt.strftime(
-        "%b %d, %Y"
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Study sessions", len(schedule))
+    c2.metric("Scheduled hours", f"{total_hours:.1f}")
+    c3.metric(
+        "Tasks included",
+        len({row["Task"] for row in schedule}),
     )
+
+    display_rows = []
+
+    for row in schedule:
+        display_rows.append(
+            {
+                "Date": row["Date"].strftime("%b %d, %Y"),
+                "Day": row["Day"],
+                "Subject": row["Subject"],
+                "Task": row["Task"],
+                "Study Time": row["Study Time"],
+                "Priority": row["Priority"],
+                "Status": row["Status"],
+            }
+        )
+
+    schedule_df = pd.DataFrame(display_rows)
 
     st.dataframe(
-        table_df,
+        schedule_df,
         use_container_width=True,
         hide_index=True,
     )
 
     st.download_button(
-        "Download timetable as CSV",
-        data=export_df[display_columns].to_csv(index=False).encode("utf-8"),
-        file_name="focusflow_study_timetable.csv",
+        "Download study plan",
+        data=schedule_df.to_csv(index=False).encode("utf-8"),
+        file_name="studyflow_weekly_plan.csv",
         mime="text/csv",
         use_container_width=True,
     )
 
-    st.divider()
-    st.markdown(
-        '<div class="section-title">Daily schedule</div>',
-        unsafe_allow_html=True,
-    )
-
-    schedule_by_date: dict[date, list[dict]] = {}
-    for session in schedule:
-        schedule_by_date.setdefault(session["Date"], []).append(session)
-
-    day_tabs = st.tabs(
-        [
-            day_date.strftime("%a %b %d")
-            for day_date in schedule_by_date.keys()
-        ]
-    )
-
-    for tab, (day_date, sessions) in zip(
-        day_tabs,
-        schedule_by_date.items(),
-    ):
-        with tab:
-            day_total = sum(session["Minutes"] for session in sessions)
-            st.caption(
-                f"{day_date.strftime('%A, %B %d')} · "
-                f"{day_total / 60:.1f} scheduled hours"
-            )
-
-            for session in sessions:
-                icon = TASK_ICONS.get(session["Type"], "📌")
-                urgency_class = (
-                    "badge-red"
-                    if session["Urgency"] in {"Urgent", "Overdue"}
-                    else "badge-orange"
-                    if session["Urgency"] == "Due soon"
-                    else "badge-green"
-                )
-
-                st.markdown(
-                    f"""
-                    <div class="session-row">
-                        <div style="font-weight:760;">
-                            {session["Start"]}–{session["End"]} ·
-                            {icon} {session["Subject"]}
-                        </div>
-                        <div>{session["Task"]}</div>
-                        <div style="margin-top:0.35rem;">
-                            <span class="badge {urgency_class}">
-                                {session["Urgency"]}
-                            </span>
-                            <span class="badge badge-purple">
-                                {session["Study Time"]}
-                            </span>
-                        </div>
-                        <div class="muted" style="margin-top:0.4rem;">
-                            {session["Reason"]}
-                        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
     if warnings:
-        st.divider()
-        st.warning(
-            "Some work did not fit into the available schedule."
-        )
+        st.warning("Some work did not fit into the available hours.")
         for warning in warnings:
             st.write(f"• {warning}")
-        st.caption(
-            "Increase availability, extend the plan, reduce estimated hours, "
-            "or update the deadline."
-        )
 
 
-def availability_page(availability: dict[str, dict]) -> None:
-    st.markdown(
-        '<div class="section-title">Weekly availability</div>',
-        unsafe_allow_html=True,
-    )
-    st.caption(
-        "Set both your maximum study hours and the time window "
-        "when you are normally free."
-    )
-
-    updated: dict[str, dict] = {}
-
-    with st.form("availability_form"):
-        for day_name in WEEKDAYS:
-            values = availability[day_name]
-
-            st.markdown(f"**{day_name}**")
-            c1, c2, c3 = st.columns([1.2, 1, 1])
-
-            with c1:
-                hours = st.slider(
-                    f"{day_name} hours",
-                    min_value=0.0,
-                    max_value=10.0,
-                    value=float(values["hours"]),
-                    step=0.5,
-                    label_visibility="collapsed",
-                )
-
-            with c2:
-                start_value = st.time_input(
-                    f"{day_name} start",
-                    value=time.fromisoformat(values["start"]),
-                    label_visibility="collapsed",
-                )
-
-            with c3:
-                end_value = st.time_input(
-                    f"{day_name} end",
-                    value=time.fromisoformat(values["end"]),
-                    label_visibility="collapsed",
-                )
-
-            updated[day_name] = {
-                "hours": hours,
-                "start": start_value.strftime("%H:%M"),
-                "end": end_value.strftime("%H:%M"),
-            }
-
-        submitted = st.form_submit_button(
-            "Save weekly availability",
-            type="primary",
-            use_container_width=True,
-        )
-
-    if submitted:
-        invalid_days = [
-            day_name
-            for day_name, values in updated.items()
-            if time.fromisoformat(values["end"])
-            <= time.fromisoformat(values["start"])
-            and values["hours"] > 0
-        ]
-
-        if invalid_days:
-            st.error(
-                "The end time must be later than the start time for: "
-                + ", ".join(invalid_days)
-            )
-        else:
-            save_availability(updated)
-            st.success("Availability saved.")
-            st.rerun()
-
-    st.divider()
-
-    availability_rows = [
-        {
-            "Day": day_name,
-            "Hours": values["hours"],
-            "Study Window": (
-                f"{time.fromisoformat(values['start']).strftime('%I:%M %p').lstrip('0')}"
-                f" – "
-                f"{time.fromisoformat(values['end']).strftime('%I:%M %p').lstrip('0')}"
-            ),
-        }
-        for day_name, values in availability.items()
-    ]
-
-    st.dataframe(
-        pd.DataFrame(availability_rows),
-        use_container_width=True,
-        hide_index=True,
-    )
-
-    chart_df = (
-        pd.DataFrame(availability_rows)[["Day", "Hours"]]
-        .set_index("Day")
-    )
-    st.bar_chart(chart_df)
-
-    st.metric(
-        "Total weekly study capacity",
-        f"{sum(values['hours'] for values in availability.values()):.1f} hours",
-    )
-
-
-def about_page() -> None:
-    st.markdown(
-        '<div class="section-title">How the smart planner works</div>',
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        **FocusFlow** creates a practical study plan using five pieces of information:
-
-        1. **Deadline:** Work due sooner receives more urgency.
-        2. **Priority:** High and critical tasks move ahead of lower-priority work.
-        3. **Difficulty:** Difficult subjects are scheduled earlier.
-        4. **Remaining workload:** Large unfinished tasks receive additional attention.
-        5. **Availability:** Sessions never exceed the hours and time windows you set.
-
-        Large tasks are broken into manageable sessions. The planner also adds optional
-        breaks, flags work that cannot fit before its deadline, and recommends the best
-        task to work on next.
-        """
-    )
-
-    st.info(
-        "All information is stored locally in focusflow.db. "
-        "No account or internet connection is required after installation."
-    )
-
-
-# =========================================================
-# MAIN APPLICATION
-# =========================================================
+# ---------------------------------------------------------
+# MAIN APP
+# ---------------------------------------------------------
 
 initialize_database()
-all_tasks = read_tasks(include_completed=True)
-availability = read_availability()
+
+tasks = get_tasks()
+availability = get_availability()
 
 with st.sidebar:
     st.markdown(
-        f"""
-        <div class="brand-card">
-            <div class="brand-name">🎓 {APP_NAME}</div>
-            <div class="brand-caption">Smart planning for better study habits</div>
+        """
+        <div class="brand">
+            <div class="brand-title">📘 StudyFlow</div>
+            <div class="brand-subtitle">Simple smart study planning</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    selected_page = st.radio(
+    page = st.radio(
         "Navigation",
         [
             "Dashboard",
             "Add Task",
-            "Manage Tasks",
-            "Smart Timetable",
-            "Availability",
-            "How It Works",
+            "My Tasks",
+            "Study Plan",
         ],
         label_visibility="collapsed",
     )
 
     st.divider()
 
-    active_count = sum(1 for task in all_tasks if not task["completed"])
-    urgent_count = sum(
-        1
-        for task in all_tasks
-        if not task["completed"] and days_left(task) <= 1
-    )
+    active_count = len([
+        task for task in tasks if not task["completed"]
+    ])
+
+    urgent_count = len([
+        task
+        for task in tasks
+        if not task["completed"] and days_remaining(task) <= 1
+    ])
 
     st.metric("Active tasks", active_count)
     st.metric("Urgent / overdue", urgent_count)
 
-    st.caption("Data is saved automatically on this computer.")
+render_header()
 
-render_hero()
-
-if selected_page == "Dashboard":
-    dashboard_page(all_tasks, availability)
-elif selected_page == "Add Task":
+if page == "Dashboard":
+    dashboard_page(tasks, availability)
+elif page == "Add Task":
     add_task_page()
-elif selected_page == "Manage Tasks":
-    manage_tasks_page(all_tasks)
-elif selected_page == "Smart Timetable":
-    timetable_page(all_tasks, availability)
-elif selected_page == "Availability":
-    availability_page(availability)
+elif page == "My Tasks":
+    my_tasks_page(tasks)
 else:
-    about_page()
+    study_plan_page(tasks, availability)
