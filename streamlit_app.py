@@ -3,7 +3,7 @@ from __future__ import annotations
 import html
 import sqlite3
 import time as time_module
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -42,28 +42,114 @@ st.set_page_config(
 
 
 # ---------------------------------------------------------
-# HIGH-CONTRAST DARK THEME
+# DARK / LIGHT THEME
 # ---------------------------------------------------------
 
-st.markdown(
-    """
+if "app_theme" not in st.session_state:
+    st.session_state.app_theme = "Dark"
+
+
+THEME_PALETTES = {
+    "Dark": {
+        "page": "#071416",
+        "page_end": "#061113",
+        "page_glow_1": "rgba(45, 212, 191, 0.11)",
+        "page_glow_2": "rgba(20, 184, 166, 0.07)",
+        "header": "rgba(7, 20, 22, 0.84)",
+        "sidebar_start": "#0d282a",
+        "sidebar": "#0b2023",
+        "sidebar_end": "#08191b",
+        "card": "#10272b",
+        "card_alt": "#0d2226",
+        "card_hover": "#153238",
+        "input": "#0c2024",
+        "text": "#f4fbfa",
+        "text_soft": "#b8ccca",
+        "text_faint": "#8fa9a7",
+        "accent": "#2dd4bf",
+        "accent_hover": "#5eead4",
+        "accent_text": "#032421",
+        "border": "rgba(144, 205, 200, 0.24)",
+        "border_strong": "rgba(45, 212, 191, 0.48)",
+        "shadow": "rgba(0, 0, 0, 0.30)",
+        "nav_text": "#d9e9e7",
+        "nav_hover": "#123438",
+        "nav_selected_1": "#164b4d",
+        "nav_selected_2": "#123b3f",
+        "form": "rgba(13, 34, 38, 0.62)",
+        "alert": "#10282c",
+        "progress_track": "#173438",
+        "table": "#0d2226",
+    },
+    "Light": {
+        "page": "#edf5f3",
+        "page_end": "#f8fbfa",
+        "page_glow_1": "rgba(15, 118, 110, 0.12)",
+        "page_glow_2": "rgba(20, 184, 166, 0.08)",
+        "header": "rgba(248, 251, 250, 0.88)",
+        "sidebar_start": "#dcece8",
+        "sidebar": "#e8f3f0",
+        "sidebar_end": "#f1f7f5",
+        "card": "#ffffff",
+        "card_alt": "#f3f8f6",
+        "card_hover": "#edf7f4",
+        "input": "#ffffff",
+        "text": "#153a3d",
+        "text_soft": "#4e696b",
+        "text_faint": "#6a8183",
+        "accent": "#0f766e",
+        "accent_hover": "#115e59",
+        "accent_text": "#ffffff",
+        "border": "rgba(39, 91, 88, 0.22)",
+        "border_strong": "rgba(15, 118, 110, 0.50)",
+        "shadow": "rgba(23, 59, 63, 0.13)",
+        "nav_text": "#244c4f",
+        "nav_hover": "#d8ebe7",
+        "nav_selected_1": "#c9e7e1",
+        "nav_selected_2": "#d8eeea",
+        "form": "rgba(255, 255, 255, 0.76)",
+        "alert": "#e7f3f0",
+        "progress_track": "#cfe3df",
+        "table": "#ffffff",
+    },
+}
+
+
+def apply_app_theme(theme_name: str) -> None:
+    palette = THEME_PALETTES[theme_name]
+
+    css = """
     <style>
         :root {
-            --page: #071416;
-            --page-soft: #0a1b1e;
-            --sidebar: #0b2023;
-            --card: #10272b;
-            --card-hover: #153238;
-            --input: #0c2024;
-            --text: #f4fbfa;
-            --text-soft: #b8ccca;
-            --text-faint: #8fa9a7;
-            --accent: #2dd4bf;
-            --accent-strong: #14b8a6;
-            --accent-dark: #0f766e;
-            --border: rgba(144, 205, 200, 0.24);
-            --border-strong: rgba(45, 212, 191, 0.48);
-            --shadow: rgba(0, 0, 0, 0.30);
+            --page: %%PAGE%%;
+            --page-end: %%PAGE_END%%;
+            --page-glow-1: %%PAGE_GLOW_1%%;
+            --page-glow-2: %%PAGE_GLOW_2%%;
+            --header: %%HEADER%%;
+            --sidebar-start: %%SIDEBAR_START%%;
+            --sidebar: %%SIDEBAR%%;
+            --sidebar-end: %%SIDEBAR_END%%;
+            --card: %%CARD%%;
+            --card-alt: %%CARD_ALT%%;
+            --card-hover: %%CARD_HOVER%%;
+            --input: %%INPUT%%;
+            --text: %%TEXT%%;
+            --text-soft: %%TEXT_SOFT%%;
+            --text-faint: %%TEXT_FAINT%%;
+            --accent: %%ACCENT%%;
+            --accent-hover: %%ACCENT_HOVER%%;
+            --accent-text: %%ACCENT_TEXT%%;
+            --border: %%BORDER%%;
+            --border-strong: %%BORDER_STRONG%%;
+            --shadow: %%SHADOW%%;
+            --nav-text: %%NAV_TEXT%%;
+            --nav-hover: %%NAV_HOVER%%;
+            --nav-selected-1: %%NAV_SELECTED_1%%;
+            --nav-selected-2: %%NAV_SELECTED_2%%;
+            --form: %%FORM%%;
+            --alert: %%ALERT%%;
+            --progress-track: %%PROGRESS_TRACK%%;
+            --table: %%TABLE%%;
         }
 
         html, body, [class*="css"] {
@@ -74,13 +160,13 @@ st.markdown(
         [data-testid="stAppViewContainer"] {
             color: var(--text);
             background:
-                radial-gradient(circle at 12% 0%, rgba(45,212,191,0.11), transparent 28rem),
-                radial-gradient(circle at 88% 5%, rgba(20,184,166,0.07), transparent 25rem),
-                linear-gradient(180deg, #081719 0%, var(--page) 55%, #061113 100%);
+                radial-gradient(circle at 12% 0%, var(--page-glow-1), transparent 28rem),
+                radial-gradient(circle at 88% 5%, var(--page-glow-2), transparent 25rem),
+                linear-gradient(180deg, var(--page) 0%, var(--page-end) 100%);
         }
 
         [data-testid="stHeader"] {
-            background: rgba(7, 20, 22, 0.82);
+            background: var(--header);
         }
 
         .block-container {
@@ -106,7 +192,12 @@ st.markdown(
         /* Sidebar */
         [data-testid="stSidebar"] {
             background:
-                linear-gradient(180deg, #0d282a 0%, var(--sidebar) 42%, #08191b 100%);
+                linear-gradient(
+                    180deg,
+                    var(--sidebar-start) 0%,
+                    var(--sidebar) 42%,
+                    var(--sidebar-end) 100%
+                );
             border-right: 1px solid var(--border);
         }
 
@@ -120,12 +211,12 @@ st.markdown(
 
         .brand {
             padding: 1.08rem;
-            border: 1px solid rgba(94, 234, 212, 0.28);
+            border: 1px solid rgba(94, 234, 212, 0.34);
             border-radius: 18px;
             background: linear-gradient(135deg, #0f766e, #115e59);
             color: #ffffff;
-            margin-bottom: 1.05rem;
-            box-shadow: 0 12px 30px rgba(0,0,0,0.28);
+            margin-bottom: 1rem;
+            box-shadow: 0 12px 30px var(--shadow);
         }
 
         .brand-title {
@@ -142,7 +233,16 @@ st.markdown(
             margin-top: 0.22rem;
         }
 
-        /* Clean sidebar navigation: hide radio dots */
+        .theme-label {
+            color: var(--text-soft);
+            font-size: 0.78rem;
+            font-weight: 750;
+            letter-spacing: 0.04em;
+            margin: 0.2rem 0 0.35rem;
+            text-transform: uppercase;
+        }
+
+        /* Clean sidebar navigation */
         [data-testid="stSidebar"] div[role="radiogroup"] {
             gap: 0.42rem;
         }
@@ -163,23 +263,34 @@ st.markdown(
         }
 
         [data-testid="stSidebar"] div[role="radiogroup"] > label p {
-            color: #d9e9e7 !important;
+            color: var(--nav-text) !important;
             font-weight: 650;
         }
 
         [data-testid="stSidebar"] div[role="radiogroup"] > label:hover {
-            background: #123438;
-            border-color: rgba(94,234,212,0.24);
+            background: var(--nav-hover);
+            border-color: var(--border);
         }
 
         [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) {
-            background: linear-gradient(135deg, #164b4d, #123b3f);
+            background:
+                linear-gradient(
+                    135deg,
+                    var(--nav-selected-1),
+                    var(--nav-selected-2)
+                );
             border-color: var(--accent);
-            box-shadow: 0 6px 18px rgba(0,0,0,0.24);
+            box-shadow: 0 6px 18px var(--shadow);
         }
 
         [data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p {
-            color: #ffffff !important;
+            color: var(--text) !important;
+        }
+
+        /* Toggle */
+        [data-testid="stToggle"] label p {
+            color: var(--text) !important;
+            font-weight: 700;
         }
 
         /* Main cards */
@@ -187,13 +298,13 @@ st.markdown(
             padding: 1.35rem 1.45rem;
             border: 1px solid var(--border);
             border-radius: 20px;
-            background: linear-gradient(145deg, #112b2f, #0d2226);
+            background: linear-gradient(145deg, var(--card), var(--card-alt));
             margin-bottom: 1.2rem;
             box-shadow: 0 12px 30px var(--shadow);
         }
 
         .hero h1 {
-            color: #ffffff;
+            color: var(--text);
             font-size: 2rem;
             margin: 0;
             letter-spacing: -0.035em;
@@ -208,9 +319,9 @@ st.markdown(
             padding: 0.95rem 1rem;
             border: 1px solid var(--border);
             border-radius: 15px;
-            background: linear-gradient(145deg, #122c30, #0e2428);
+            background: linear-gradient(145deg, var(--card), var(--card-alt));
             margin-bottom: 0.68rem;
-            box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+            box-shadow: 0 6px 18px var(--shadow);
         }
 
         .task-card:hover {
@@ -218,13 +329,13 @@ st.markdown(
             border-color: var(--border-strong);
         }
 
-        .urgent { border-left: 6px solid #ff6b6b; }
-        .soon { border-left: 6px solid #ffbf47; }
-        .normal { border-left: 6px solid #3dd6b5; }
-        .overdue { border-left: 6px solid #ff4242; }
+        .urgent { border-left: 6px solid #ef5f5f; }
+        .soon { border-left: 6px solid #eaa72e; }
+        .normal { border-left: 6px solid #20a486; }
+        .overdue { border-left: 6px solid #d93636; }
 
         .task-title {
-            color: #ffffff;
+            color: var(--text);
             font-weight: 760;
             font-size: 1rem;
         }
@@ -247,42 +358,42 @@ st.markdown(
         }
 
         .red {
-            color: #ffdada;
-            background: rgba(239,68,68,0.20);
-            border-color: rgba(248,113,113,0.44);
+            color: #7f1d1d;
+            background: #fee2e2;
+            border-color: #fca5a5;
         }
 
         .orange {
-            color: #ffe8b0;
-            background: rgba(245,158,11,0.18);
-            border-color: rgba(251,191,36,0.42);
+            color: #78350f;
+            background: #fef3c7;
+            border-color: #fcd34d;
         }
 
         .green {
-            color: #c8fff1;
-            background: rgba(16,185,129,0.17);
-            border-color: rgba(52,211,153,0.40);
+            color: #065f46;
+            background: #d1fae5;
+            border-color: #6ee7b7;
         }
 
         .teal {
-            color: #ccfff8;
-            background: rgba(45,212,191,0.16);
-            border-color: rgba(94,234,212,0.38);
+            color: #115e59;
+            background: #ccfbf1;
+            border-color: #5eead4;
         }
 
         .gray {
-            color: #e2eeee;
-            background: rgba(148,163,184,0.17);
-            border-color: rgba(203,213,225,0.27);
+            color: #334155;
+            background: #e2e8f0;
+            border-color: #cbd5e1;
         }
 
         .next-task {
             padding: 1.15rem;
-            border: 1px solid rgba(94,234,212,0.32);
+            border: 1px solid rgba(94, 234, 212, 0.38);
             border-radius: 17px;
             color: #ffffff;
             background: linear-gradient(135deg, #0f766e, #115e59);
-            box-shadow: 0 14px 30px rgba(0,0,0,0.28);
+            box-shadow: 0 14px 30px var(--shadow);
         }
 
         .timer-card {
@@ -290,8 +401,8 @@ st.markdown(
             padding: 1.55rem 1rem;
             border: 1px solid var(--border-strong);
             border-radius: 22px;
-            background: linear-gradient(145deg, #122e32, #0b2024);
-            box-shadow: 0 14px 34px rgba(0,0,0,0.30);
+            background: linear-gradient(145deg, var(--card), var(--card-alt));
+            box-shadow: 0 14px 34px var(--shadow);
             margin: 0.75rem 0;
         }
 
@@ -302,18 +413,17 @@ st.markdown(
         }
 
         .timer-display {
-            color: #ffffff;
+            color: var(--text);
             font-size: clamp(3.4rem, 9vw, 6rem);
             line-height: 1;
             font-weight: 850;
             letter-spacing: -0.06em;
             margin: 0.55rem 0;
             font-variant-numeric: tabular-nums;
-            text-shadow: 0 0 24px rgba(45,212,191,0.16);
         }
 
         .timer-status {
-            color: #5eead4;
+            color: var(--accent);
             font-size: 0.9rem;
             font-weight: 760;
         }
@@ -322,13 +432,17 @@ st.markdown(
             padding: 0.82rem 0.92rem;
             border-radius: 13px;
             color: var(--text);
-            background: #10282c;
+            background: var(--card-alt);
             border: 1px solid var(--border);
             margin: 0.45rem 0;
         }
 
         .session-card strong {
-            color: #ffffff;
+            color: var(--text);
+        }
+
+        .session-card span {
+            color: var(--text-soft) !important;
         }
 
         /* Metrics */
@@ -336,8 +450,8 @@ st.markdown(
             padding: 0.9rem;
             border: 1px solid var(--border);
             border-radius: 15px;
-            background: linear-gradient(145deg, #112b2f, #0d2226);
-            box-shadow: 0 7px 20px rgba(0,0,0,0.20);
+            background: linear-gradient(145deg, var(--card), var(--card-alt));
+            box-shadow: 0 7px 20px var(--shadow);
         }
 
         [data-testid="stMetricLabel"] p {
@@ -346,11 +460,11 @@ st.markdown(
         }
 
         [data-testid="stMetricValue"] {
-            color: #ffffff !important;
+            color: var(--text) !important;
         }
 
         [data-testid="stMetricDelta"] {
-            color: #5eead4 !important;
+            color: var(--accent) !important;
         }
 
         /* Buttons */
@@ -358,45 +472,48 @@ st.markdown(
         .stDownloadButton > button {
             min-height: 2.65rem;
             border-radius: 11px;
-            border: 1px solid rgba(94,234,212,0.30);
-            color: #f4fffd;
-            background: #123438;
+            border: 1px solid var(--border-strong);
+            color: var(--text);
+            background: var(--card-alt);
             font-weight: 700;
             box-shadow: none;
         }
 
         .stButton > button:hover,
         .stDownloadButton > button:hover {
-            color: #ffffff;
-            background: #185057;
+            color: var(--text);
+            background: var(--card-hover);
             border-color: var(--accent);
         }
 
         .stButton > button[kind="primary"] {
-            color: #042421;
-            background: #5eead4;
-            border-color: #5eead4;
+            color: var(--accent-text);
+            background: var(--accent);
+            border-color: var(--accent);
         }
 
         .stButton > button[kind="primary"]:hover {
-            color: #021b18;
-            background: #99f6e4;
-            border-color: #99f6e4;
+            color: var(--accent-text);
+            background: var(--accent-hover);
+            border-color: var(--accent-hover);
         }
 
         .stButton > button:disabled {
-            color: #78908e !important;
-            background: #102326 !important;
-            border-color: #263f42 !important;
+            color: var(--text-faint) !important;
+            background: var(--card-alt) !important;
+            border-color: var(--border) !important;
             opacity: 0.72;
         }
 
-        /* Inputs and selectors */
+        /* Inputs */
         .stTextInput label,
         .stNumberInput label,
         .stDateInput label,
+        .stTimeInput label,
         .stSelectbox label,
-        .stSlider label {
+        .stSlider label,
+        .stCheckbox label,
+        .stRadio label {
             color: var(--text) !important;
             font-weight: 650;
         }
@@ -404,80 +521,82 @@ st.markdown(
         .stTextInput input,
         .stNumberInput input,
         .stDateInput input,
+        .stTimeInput input,
         [data-baseweb="input"] input {
-            color: #ffffff !important;
+            color: var(--text) !important;
             background: var(--input) !important;
             border-color: var(--border) !important;
             border-radius: 10px;
         }
 
         .stTextInput input::placeholder {
-            color: #78908e !important;
+            color: var(--text-faint) !important;
         }
 
         div[data-baseweb="select"] > div {
-            color: #ffffff !important;
+            color: var(--text) !important;
             background: var(--input) !important;
             border-color: var(--border) !important;
             border-radius: 10px;
         }
 
         div[data-baseweb="select"] span {
-            color: #ffffff !important;
+            color: var(--text) !important;
         }
 
         [data-baseweb="popover"],
         [role="listbox"] {
-            color: #ffffff !important;
-            background: #10272b !important;
+            color: var(--text) !important;
+            background: var(--card) !important;
         }
 
         [role="option"] {
-            color: #eafffc !important;
-            background: #10272b !important;
+            color: var(--text) !important;
+            background: var(--card) !important;
         }
 
         [role="option"]:hover {
-            background: #174148 !important;
+            background: var(--card-hover) !important;
         }
 
-        /* Expanders, forms, tabs and tables */
+        /* Expanders, forms, tables */
         [data-testid="stExpander"] {
             border: 1px solid var(--border);
             border-radius: 13px;
-            background: #0d2226;
+            background: var(--card-alt);
         }
 
         [data-testid="stExpander"] summary,
         [data-testid="stExpander"] summary p {
-            color: #ffffff !important;
+            color: var(--text) !important;
         }
 
         [data-testid="stForm"] {
             border-color: var(--border);
-            background: rgba(13,34,38,0.52);
+            background: var(--form);
         }
 
         [data-testid="stDataFrame"] {
             border: 1px solid var(--border);
             border-radius: 13px;
             overflow: hidden;
+            background: var(--table);
         }
 
         /* Alerts */
         [data-testid="stAlert"] {
-            color: #ffffff;
+            color: var(--text);
             border: 1px solid var(--border);
-            background: #10282c;
+            background: var(--alert);
         }
 
         [data-testid="stAlert"] p {
-            color: #eefcfa !important;
+            color: var(--text) !important;
         }
 
         /* Progress bars */
         [data-testid="stProgress"] > div > div {
-            background: #173438;
+            background: var(--progress-track);
         }
 
         [data-testid="stProgress"] > div > div > div {
@@ -485,19 +604,55 @@ st.markdown(
         }
 
         hr {
-            border-color: rgba(148,205,200,0.18);
+            border-color: var(--border);
         }
 
-        /* Keep inline secondary text readable */
         .session-card span,
         .task-card span {
             text-rendering: optimizeLegibility;
         }
     </style>
-    """,
-    unsafe_allow_html=True,
-)
+    """
 
+    replacements = {
+        "%%PAGE%%": palette["page"],
+        "%%PAGE_END%%": palette["page_end"],
+        "%%PAGE_GLOW_1%%": palette["page_glow_1"],
+        "%%PAGE_GLOW_2%%": palette["page_glow_2"],
+        "%%HEADER%%": palette["header"],
+        "%%SIDEBAR_START%%": palette["sidebar_start"],
+        "%%SIDEBAR%%": palette["sidebar"],
+        "%%SIDEBAR_END%%": palette["sidebar_end"],
+        "%%CARD%%": palette["card"],
+        "%%CARD_ALT%%": palette["card_alt"],
+        "%%CARD_HOVER%%": palette["card_hover"],
+        "%%INPUT%%": palette["input"],
+        "%%TEXT%%": palette["text"],
+        "%%TEXT_SOFT%%": palette["text_soft"],
+        "%%TEXT_FAINT%%": palette["text_faint"],
+        "%%ACCENT%%": palette["accent"],
+        "%%ACCENT_HOVER%%": palette["accent_hover"],
+        "%%ACCENT_TEXT%%": palette["accent_text"],
+        "%%BORDER%%": palette["border"],
+        "%%BORDER_STRONG%%": palette["border_strong"],
+        "%%SHADOW%%": palette["shadow"],
+        "%%NAV_TEXT%%": palette["nav_text"],
+        "%%NAV_HOVER%%": palette["nav_hover"],
+        "%%NAV_SELECTED_1%%": palette["nav_selected_1"],
+        "%%NAV_SELECTED_2%%": palette["nav_selected_2"],
+        "%%FORM%%": palette["form"],
+        "%%ALERT%%": palette["alert"],
+        "%%PROGRESS_TRACK%%": palette["progress_track"],
+        "%%TABLE%%": palette["table"],
+    }
+
+    for token, value in replacements.items():
+        css = css.replace(token, value)
+
+    st.markdown(css, unsafe_allow_html=True)
+
+
+apply_app_theme(st.session_state.app_theme)
 
 # ---------------------------------------------------------
 # DATABASE FUNCTIONS
@@ -543,10 +698,39 @@ def initialize_database() -> None:
             """
             CREATE TABLE IF NOT EXISTS availability (
                 day_name TEXT PRIMARY KEY,
-                study_hours REAL NOT NULL
+                study_hours REAL NOT NULL,
+                start_time TEXT NOT NULL DEFAULT '16:00',
+                end_time TEXT NOT NULL DEFAULT '18:00'
             )
             """
         )
+
+        availability_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(availability)"
+            ).fetchall()
+        }
+
+        added_time_columns = False
+
+        if "start_time" not in availability_columns:
+            connection.execute(
+                """
+                ALTER TABLE availability
+                ADD COLUMN start_time TEXT NOT NULL DEFAULT '16:00'
+                """
+            )
+            added_time_columns = True
+
+        if "end_time" not in availability_columns:
+            connection.execute(
+                """
+                ALTER TABLE availability
+                ADD COLUMN end_time TEXT NOT NULL DEFAULT '18:00'
+                """
+            )
+            added_time_columns = True
 
         connection.execute(
             """
@@ -569,14 +753,59 @@ def initialize_database() -> None:
         )
 
         for day_name in DAYS:
-            default_hours = 2.0 if day_name not in {"Saturday", "Sunday"} else 3.0
+            is_weekend = day_name in {"Saturday", "Sunday"}
+            default_hours = 3.0 if is_weekend else 2.0
+            default_start = "10:00" if is_weekend else "16:00"
+            default_end = "13:00" if is_weekend else "18:00"
+
             connection.execute(
                 """
-                INSERT OR IGNORE INTO availability (day_name, study_hours)
-                VALUES (?, ?)
+                INSERT OR IGNORE INTO availability (
+                    day_name,
+                    study_hours,
+                    start_time,
+                    end_time
+                )
+                VALUES (?, ?, ?, ?)
                 """,
-                (day_name, default_hours),
+                (
+                    day_name,
+                    default_hours,
+                    default_start,
+                    default_end,
+                ),
             )
+
+        # Preserve hours from an older StudyFlow database by converting them
+        # into a matching start/end window the first time this version runs.
+        if added_time_columns:
+            rows = connection.execute(
+                """
+                SELECT day_name, study_hours
+                FROM availability
+                """
+            ).fetchall()
+
+            for row in rows:
+                is_weekend = row["day_name"] in {"Saturday", "Sunday"}
+                start_value = time(10, 0) if is_weekend else time(16, 0)
+                start_dt = datetime.combine(date.today(), start_value)
+                end_dt = start_dt + timedelta(
+                    hours=max(0.0, float(row["study_hours"]))
+                )
+
+                connection.execute(
+                    """
+                    UPDATE availability
+                    SET start_time = ?, end_time = ?
+                    WHERE day_name = ?
+                    """,
+                    (
+                        start_value.strftime("%H:%M"),
+                        end_dt.time().strftime("%H:%M"),
+                        row["day_name"],
+                    ),
+                )
 
         connection.execute(
             """
@@ -584,6 +813,7 @@ def initialize_database() -> None:
             VALUES ('daily_focus_goal', '60')
             """
         )
+
 
 
 def add_task(
@@ -705,35 +935,94 @@ def delete_task(task_id: int) -> None:
         )
 
 
-def get_availability() -> dict[str, float]:
+def availability_window_hours(day_settings: dict) -> float:
+    if not day_settings.get("enabled", False):
+        return 0.0
+
+    start_value = time.fromisoformat(day_settings["start"])
+    end_value = time.fromisoformat(day_settings["end"])
+
+    start_dt = datetime.combine(date.today(), start_value)
+    end_dt = datetime.combine(date.today(), end_value)
+
+    return max(0.0, (end_dt - start_dt).total_seconds() / 3600)
+
+
+def get_availability() -> dict[str, dict]:
     with connect() as connection:
         rows = connection.execute(
-            "SELECT day_name, study_hours FROM availability"
+            """
+            SELECT day_name, study_hours, start_time, end_time
+            FROM availability
+            """
         ).fetchall()
 
     saved = {
-        row["day_name"]: float(row["study_hours"])
+        row["day_name"]: {
+            "enabled": float(row["study_hours"]) > 0,
+            "start": row["start_time"],
+            "end": row["end_time"],
+        }
         for row in rows
     }
 
-    return {
-        day_name: saved.get(day_name, 0.0)
-        for day_name in DAYS
-    }
+    result: dict[str, dict] = {}
+
+    for day_name in DAYS:
+        is_weekend = day_name in {"Saturday", "Sunday"}
+        result[day_name] = saved.get(
+            day_name,
+            {
+                "enabled": True,
+                "start": "10:00" if is_weekend else "16:00",
+                "end": "13:00" if is_weekend else "18:00",
+            },
+        )
+
+    return result
 
 
-def save_availability(availability: dict[str, float]) -> None:
+
+def save_availability(availability: dict[str, dict]) -> None:
     with connect() as connection:
-        for day_name, hours in availability.items():
+        for day_name, values in availability.items():
+            enabled = bool(values["enabled"])
+            start_value = time.fromisoformat(values["start"])
+            end_value = time.fromisoformat(values["end"])
+
+            if enabled:
+                start_dt = datetime.combine(date.today(), start_value)
+                end_dt = datetime.combine(date.today(), end_value)
+                study_hours = max(
+                    0.0,
+                    (end_dt - start_dt).total_seconds() / 3600,
+                )
+            else:
+                study_hours = 0.0
+
             connection.execute(
                 """
-                INSERT INTO availability (day_name, study_hours)
-                VALUES (?, ?)
+                INSERT INTO availability (
+                    day_name,
+                    study_hours,
+                    start_time,
+                    end_time
+                )
+                VALUES (?, ?, ?, ?)
                 ON CONFLICT(day_name)
-                DO UPDATE SET study_hours = excluded.study_hours
+                DO UPDATE SET
+                    study_hours = excluded.study_hours,
+                    start_time = excluded.start_time,
+                    end_time = excluded.end_time
                 """,
-                (day_name, float(hours)),
+                (
+                    day_name,
+                    study_hours,
+                    values["start"],
+                    values["end"],
+                ),
             )
+
 
 
 def get_setting(key: str, fallback: str) -> str:
@@ -885,15 +1174,43 @@ def smart_score(task: dict) -> float:
 
 def generate_weekly_plan(
     tasks: list[dict],
-    availability: dict[str, float],
+    availability: dict[str, dict],
 ) -> tuple[list[dict], list[str]]:
     today = date.today()
+    now = datetime.now()
     plan_dates = [today + timedelta(days=offset) for offset in range(7)]
 
-    available_hours = {
-        plan_date: availability[plan_date.strftime("%A")]
-        for plan_date in plan_dates
-    }
+    day_windows: dict[date, dict] = {}
+
+    for plan_date in plan_dates:
+        weekday = plan_date.strftime("%A")
+        settings = availability[weekday]
+
+        if not settings["enabled"]:
+            continue
+
+        start_value = time.fromisoformat(settings["start"])
+        end_value = time.fromisoformat(settings["end"])
+        start_dt = datetime.combine(plan_date, start_value)
+        end_dt = datetime.combine(plan_date, end_value)
+
+        # Do not create sessions in the past for the current day.
+        if plan_date == today and start_dt < now:
+            minute = ((now.minute + 14) // 15) * 15
+            rounded = now.replace(second=0, microsecond=0)
+
+            if minute >= 60:
+                rounded = rounded.replace(minute=0) + timedelta(hours=1)
+            else:
+                rounded = rounded.replace(minute=minute)
+
+            start_dt = max(start_dt, rounded)
+
+        if end_dt > start_dt:
+            day_windows[plan_date] = {
+                "next_start": start_dt,
+                "end": end_dt,
+            }
 
     active_tasks = [
         task.copy()
@@ -902,7 +1219,9 @@ def generate_weekly_plan(
     ]
 
     for task in active_tasks:
-        task["remaining_hours"] = remaining_task_hours(task)
+        task["remaining_minutes"] = int(
+            round(remaining_task_hours(task) * 60)
+        )
         task["score"] = smart_score(task)
 
     active_tasks.sort(
@@ -916,55 +1235,89 @@ def generate_weekly_plan(
         due_date_value = date.fromisoformat(task["due_date"])
 
         if due_date_value < today:
-            allowed_dates = plan_dates
+            allowed_dates = list(day_windows.keys())
         else:
             allowed_dates = [
                 plan_date
-                for plan_date in plan_dates
+                for plan_date in day_windows
                 if plan_date <= due_date_value
             ]
 
-        while task["remaining_hours"] > 0:
-            possible_dates = [
-                plan_date
-                for plan_date in allowed_dates
-                if available_hours[plan_date] > 0
-            ]
+        while task["remaining_minutes"] > 0:
+            possible_dates = []
+
+            for plan_date in allowed_dates:
+                window = day_windows[plan_date]
+                free_minutes = int(
+                    (window["end"] - window["next_start"]).total_seconds()
+                    // 60
+                )
+
+                if free_minutes >= 15:
+                    possible_dates.append(plan_date)
 
             if not possible_dates:
                 break
 
             chosen_date = possible_dates[0]
-
-            session_hours = min(
-                1.0,
-                task["remaining_hours"],
-                available_hours[chosen_date],
+            window = day_windows[chosen_date]
+            free_minutes = int(
+                (window["end"] - window["next_start"]).total_seconds() // 60
             )
+
+            session_minutes = min(
+                60,
+                task["remaining_minutes"],
+                free_minutes,
+            )
+
+            if session_minutes < 15 and task["remaining_minutes"] >= 15:
+                window["next_start"] = window["end"]
+                continue
+
+            start_dt = window["next_start"]
+            end_dt = start_dt + timedelta(minutes=session_minutes)
 
             schedule.append(
                 {
                     "Date": chosen_date,
                     "Day": chosen_date.strftime("%A"),
+                    "Time": (
+                        f"{start_dt.strftime('%I:%M %p').lstrip('0')}"
+                        f"–{end_dt.strftime('%I:%M %p').lstrip('0')}"
+                    ),
                     "Subject": task["subject"],
                     "Task": task["task_name"],
-                    "Study Time": f"{session_hours:.1f} hr",
+                    "Study Time": (
+                        f"{session_minutes / 60:.1f} hr"
+                        if session_minutes >= 30
+                        else f"{session_minutes} min"
+                    ),
                     "Priority": task["priority"],
                     "Status": urgency(task)[0],
+                    "_start": start_dt,
                 }
             )
 
-            task["remaining_hours"] -= session_hours
-            available_hours[chosen_date] -= session_hours
+            task["remaining_minutes"] -= session_minutes
 
-        if task["remaining_hours"] > 0:
+            # A short transition break keeps the generated timetable realistic.
+            next_start = end_dt + timedelta(minutes=10)
+            window["next_start"] = min(next_start, window["end"])
+
+        if task["remaining_minutes"] > 0:
             warnings.append(
                 f"{task['subject']} — {task['task_name']} still needs "
-                f"{task['remaining_hours']:.1f} hour(s)."
+                f"{task['remaining_minutes'] / 60:.1f} hour(s)."
             )
 
-    schedule.sort(key=lambda row: row["Date"])
+    schedule.sort(key=lambda row: (row["Date"], row["_start"]))
+
+    for row in schedule:
+        row.pop("_start", None)
+
     return schedule, warnings
+
 
 
 # ---------------------------------------------------------
@@ -976,16 +1329,20 @@ def initialize_timer_state() -> None:
         "timer_running": False,
         "timer_end_timestamp": 0.0,
         "timer_remaining_seconds": 25 * 60,
-        "timer_duration_minutes": 25,
+        "timer_focus_minutes": 25,
+        "timer_break_minutes": 5,
+        "timer_phase": "Focus",
         "timer_task_id": None,
         "timer_config": None,
         "timer_logged": False,
         "timer_complete_notice": False,
+        "timer_break_complete_notice": False,
     }
 
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 
 
 @st.fragment(run_every="1s")
@@ -1006,25 +1363,55 @@ def render_live_timer() -> None:
             st.session_state.timer_remaining_seconds
         )
 
-    if (
-        remaining_seconds <= 0
-        and not st.session_state.timer_logged
-        and st.session_state.timer_task_id is not None
-    ):
-        st.session_state.timer_running = False
-        st.session_state.timer_remaining_seconds = 0
-        record_focus_session(
-            int(st.session_state.timer_task_id),
-            int(st.session_state.timer_duration_minutes),
-        )
-        st.session_state.timer_logged = True
-        st.session_state.timer_complete_notice = True
+    if remaining_seconds <= 0 and st.session_state.timer_running:
+        if st.session_state.timer_phase == "Focus":
+            if (
+                not st.session_state.timer_logged
+                and st.session_state.timer_task_id is not None
+            ):
+                record_focus_session(
+                    int(st.session_state.timer_task_id),
+                    int(st.session_state.timer_focus_minutes),
+                )
+                st.session_state.timer_logged = True
 
-    duration_seconds = max(
-        1,
-        int(st.session_state.timer_duration_minutes) * 60,
-    )
-    progress = 1 - remaining_seconds / duration_seconds
+            st.session_state.timer_complete_notice = True
+            st.session_state.timer_break_complete_notice = False
+            st.session_state.timer_phase = "Break"
+            st.session_state.timer_remaining_seconds = (
+                int(st.session_state.timer_break_minutes) * 60
+            )
+            st.session_state.timer_end_timestamp = (
+                time_module.time()
+                + st.session_state.timer_remaining_seconds
+            )
+            st.session_state.timer_running = True
+            remaining_seconds = st.session_state.timer_remaining_seconds
+
+        else:
+            st.session_state.timer_running = False
+            st.session_state.timer_phase = "Focus"
+            st.session_state.timer_remaining_seconds = (
+                int(st.session_state.timer_focus_minutes) * 60
+            )
+            st.session_state.timer_logged = False
+            st.session_state.timer_break_complete_notice = True
+            remaining_seconds = st.session_state.timer_remaining_seconds
+
+    phase = st.session_state.timer_phase
+
+    if phase == "Break":
+        total_seconds = max(
+            1,
+            int(st.session_state.timer_break_minutes) * 60,
+        )
+    else:
+        total_seconds = max(
+            1,
+            int(st.session_state.timer_focus_minutes) * 60,
+        )
+
+    progress = 1 - remaining_seconds / total_seconds
     progress = min(1.0, max(0.0, progress))
 
     minutes, seconds = divmod(remaining_seconds, 60)
@@ -1034,22 +1421,30 @@ def render_live_timer() -> None:
         else None
     )
 
-    if selected_task:
+    if phase == "Break":
         task_text = (
-            f"{html.escape(selected_task['subject'])}: "
-            f"{html.escape(selected_task['task_name'])}"
+            f"Pomodoro break · "
+            f"{int(st.session_state.timer_break_minutes)} minutes"
+        )
+        status_text = (
+            "Break in progress"
+            if st.session_state.timer_running
+            else "Break paused"
         )
     else:
-        task_text = "Choose a task to begin"
+        if selected_task:
+            task_text = (
+                f"{html.escape(selected_task['subject'])}: "
+                f"{html.escape(selected_task['task_name'])}"
+            )
+        else:
+            task_text = "Choose a task to begin"
 
-    status_text = (
-        "Focus session in progress"
-        if st.session_state.timer_running
-        else "Ready when you are"
-    )
-
-    if remaining_seconds == 0:
-        status_text = "Session complete"
+        status_text = (
+            "Focus session in progress"
+            if st.session_state.timer_running
+            else "Ready when you are"
+        )
 
     st.markdown(
         f"""
@@ -1063,10 +1458,19 @@ def render_live_timer() -> None:
     )
     st.progress(progress)
 
-    if st.session_state.timer_complete_notice:
+    if (
+        st.session_state.timer_complete_notice
+        and st.session_state.timer_phase == "Break"
+    ):
         st.success(
-            "Focus session completed and added to the task's progress."
+            "Focus session completed and saved. Your Pomodoro break started automatically."
         )
+
+    if st.session_state.timer_break_complete_notice:
+        st.success(
+            "Break complete. The next focus session is ready."
+        )
+
 
 
 # ---------------------------------------------------------
@@ -1115,7 +1519,7 @@ def render_task_card(task: dict) -> None:
 # PAGES
 # ---------------------------------------------------------
 
-def dashboard_page(tasks: list[dict], availability: dict[str, float]) -> None:
+def dashboard_page(tasks: list[dict], availability: dict[str, dict]) -> None:
     active_tasks = [task for task in tasks if not task["completed"]]
     completed_tasks = [task for task in tasks if task["completed"]]
     urgent_tasks = [
@@ -1128,6 +1532,11 @@ def dashboard_page(tasks: list[dict], availability: dict[str, float]) -> None:
         for task in active_tasks
     )
 
+    available_hours = sum(
+        availability_window_hours(values)
+        for values in availability.values()
+    )
+
     today_minutes, today_sessions = get_today_focus_stats()
     daily_goal = int(get_setting("daily_focus_goal", "60"))
 
@@ -1137,7 +1546,7 @@ def dashboard_page(tasks: list[dict], availability: dict[str, float]) -> None:
     m1.metric("Active tasks", len(active_tasks))
     m2.metric("Hours remaining", f"{remaining_hours:.1f}")
     m3.metric("Urgent / overdue", len(urgent_tasks))
-    m4.metric("Focused today", f"{today_minutes} min")
+    m4.metric("Weekly study time", f"{available_hours:.1f} hr")
 
     goal_progress = min(1.0, today_minutes / max(daily_goal, 1))
     st.caption(f"Daily focus goal: {today_minutes} of {daily_goal} minutes")
@@ -1183,13 +1592,17 @@ def dashboard_page(tasks: list[dict], availability: dict[str, float]) -> None:
 
     with right:
         st.subheader("Today's focus")
+        st.metric("Focused minutes", today_minutes)
         st.metric("Completed sessions", today_sessions)
+
         if today_minutes >= daily_goal:
             st.success("Daily focus goal reached.")
         elif today_sessions == 0:
             st.info("Start a focus timer session when you are ready.")
         else:
-            st.info(f"{daily_goal - today_minutes} minutes left to reach your goal.")
+            st.info(
+                f"{daily_goal - today_minutes} minutes left to reach your goal."
+            )
 
     st.divider()
     st.subheader("Upcoming tasks")
@@ -1202,6 +1615,7 @@ def dashboard_page(tasks: list[dict], availability: dict[str, float]) -> None:
             key=lambda item: item["due_date"],
         )[:6]:
             render_task_card(task)
+
 
 
 def add_task_page() -> None:
@@ -1394,10 +1808,10 @@ def my_tasks_page(tasks: list[dict]) -> None:
 def focus_timer_page(tasks: list[dict]) -> None:
     initialize_timer_state()
 
-    st.subheader("Focus Timer")
+    st.subheader("Pomodoro Focus Timer")
     st.caption(
-        "Choose a task and complete a focused study session. "
-        "Finished sessions automatically update task progress."
+        "Choose a preset or enter your own focus time. "
+        "After each completed focus session, a 5, 10, or 15-minute break starts automatically."
     )
 
     active_tasks = [
@@ -1415,9 +1829,9 @@ def focus_timer_page(tasks: list[dict]) -> None:
         for task in active_tasks
     }
 
-    left, right = st.columns([1.4, 1])
+    task_col, mode_col = st.columns([1.4, 1])
 
-    with left:
+    with task_col:
         selected_label = st.selectbox(
             "Focus task",
             list(task_options.keys()),
@@ -1425,16 +1839,55 @@ def focus_timer_page(tasks: list[dict]) -> None:
         )
         selected_task_id = task_options[selected_label]
 
-    with right:
-        selected_duration = st.selectbox(
-            "Session length",
-            [15, 25, 45, 60],
-            index=1,
+    with mode_col:
+        duration_mode = st.radio(
+            "Focus duration",
+            ["Preset", "Custom"],
+            horizontal=True,
+            disabled=st.session_state.timer_running,
+        )
+
+    duration_col, break_col = st.columns(2)
+
+    with duration_col:
+        if duration_mode == "Preset":
+            selected_duration = st.selectbox(
+                "Session length",
+                [15, 25, 45, 60],
+                index=1,
+                format_func=lambda value: f"{value} minutes",
+                disabled=st.session_state.timer_running,
+            )
+        else:
+            selected_duration = int(
+                st.number_input(
+                    "Custom focus time (minutes)",
+                    min_value=1,
+                    max_value=240,
+                    value=int(st.session_state.timer_focus_minutes),
+                    step=1,
+                    disabled=st.session_state.timer_running,
+                )
+            )
+
+    with break_col:
+        selected_break = st.selectbox(
+            "Pomodoro break",
+            [5, 10, 15],
+            index=[5, 10, 15].index(
+                int(st.session_state.timer_break_minutes)
+                if int(st.session_state.timer_break_minutes) in [5, 10, 15]
+                else 5
+            ),
             format_func=lambda value: f"{value} minutes",
             disabled=st.session_state.timer_running,
         )
 
-    config = (selected_task_id, selected_duration)
+    config = (
+        selected_task_id,
+        selected_duration,
+        selected_break,
+    )
 
     if (
         not st.session_state.timer_running
@@ -1442,34 +1895,59 @@ def focus_timer_page(tasks: list[dict]) -> None:
     ):
         st.session_state.timer_config = config
         st.session_state.timer_task_id = selected_task_id
-        st.session_state.timer_duration_minutes = selected_duration
+        st.session_state.timer_focus_minutes = selected_duration
+        st.session_state.timer_break_minutes = selected_break
+        st.session_state.timer_phase = "Focus"
         st.session_state.timer_remaining_seconds = selected_duration * 60
         st.session_state.timer_logged = False
         st.session_state.timer_complete_notice = False
+        st.session_state.timer_break_complete_notice = False
 
-    b1, b2, b3 = st.columns(3)
+    current_phase = st.session_state.timer_phase
+
+    if current_phase == "Break":
+        start_label = "▶ Resume Break"
+    elif (
+        st.session_state.timer_remaining_seconds
+        < st.session_state.timer_focus_minutes * 60
+    ):
+        start_label = "▶ Resume Focus"
+    else:
+        start_label = "▶ Start Focus"
+
+    b1, b2, b3, b4 = st.columns(4)
 
     with b1:
         if st.button(
-            "▶ Start",
+            start_label,
             type="primary",
             use_container_width=True,
             disabled=st.session_state.timer_running,
         ):
             if st.session_state.timer_remaining_seconds <= 0:
-                st.session_state.timer_remaining_seconds = (
-                    selected_duration * 60
-                )
+                if st.session_state.timer_phase == "Break":
+                    st.session_state.timer_remaining_seconds = (
+                        selected_break * 60
+                    )
+                else:
+                    st.session_state.timer_remaining_seconds = (
+                        selected_duration * 60
+                    )
 
             st.session_state.timer_task_id = selected_task_id
-            st.session_state.timer_duration_minutes = selected_duration
+            st.session_state.timer_focus_minutes = selected_duration
+            st.session_state.timer_break_minutes = selected_break
             st.session_state.timer_end_timestamp = (
                 time_module.time()
                 + st.session_state.timer_remaining_seconds
             )
             st.session_state.timer_running = True
-            st.session_state.timer_logged = False
-            st.session_state.timer_complete_notice = False
+            st.session_state.timer_break_complete_notice = False
+
+            if st.session_state.timer_phase == "Focus":
+                st.session_state.timer_logged = False
+                st.session_state.timer_complete_notice = False
+
             st.rerun()
 
     with b2:
@@ -1496,13 +1974,28 @@ def focus_timer_page(tasks: list[dict]) -> None:
             use_container_width=True,
         ):
             st.session_state.timer_running = False
-            st.session_state.timer_remaining_seconds = (
-                selected_duration * 60
-            )
-            st.session_state.timer_duration_minutes = selected_duration
+            st.session_state.timer_phase = "Focus"
+            st.session_state.timer_remaining_seconds = selected_duration * 60
+            st.session_state.timer_focus_minutes = selected_duration
+            st.session_state.timer_break_minutes = selected_break
             st.session_state.timer_task_id = selected_task_id
             st.session_state.timer_logged = False
             st.session_state.timer_complete_notice = False
+            st.session_state.timer_break_complete_notice = False
+            st.rerun()
+
+    with b4:
+        if st.button(
+            "⏭ Skip Break",
+            use_container_width=True,
+            disabled=st.session_state.timer_phase != "Break",
+        ):
+            st.session_state.timer_running = False
+            st.session_state.timer_phase = "Focus"
+            st.session_state.timer_remaining_seconds = selected_duration * 60
+            st.session_state.timer_logged = False
+            st.session_state.timer_complete_notice = False
+            st.session_state.timer_break_complete_notice = True
             st.rerun()
 
     render_live_timer()
@@ -1549,8 +2042,8 @@ def focus_timer_page(tasks: list[dict]) -> None:
                 f"""
                 <div class="session-card">
                     <strong>{subject}: {task_name}</strong><br>
-                    <span style="color:#b8ccca;">
-                        {session["minutes"]} minutes · {completed_at}
+                    <span style="color:var(--text-soft);">
+                        {session["minutes"]} focus minutes · {completed_at}
                     </span>
                 </div>
                 """,
@@ -1558,43 +2051,118 @@ def focus_timer_page(tasks: list[dict]) -> None:
             )
 
 
+
 def study_plan_page(
     tasks: list[dict],
-    availability: dict[str, float],
+    availability: dict[str, dict],
 ) -> None:
     st.subheader("Study Plan")
     st.caption(
-        "Set your available hours, then the app will build a seven-day timetable."
+        "Choose the exact times you are free each day. "
+        "StudyFlow will place sessions inside those time windows."
     )
 
-    with st.expander("Available study hours", expanded=False):
+    with st.expander("Weekly study times", expanded=True):
+        st.markdown(
+            "**Select the days you can study, then choose a start and end time.**"
+        )
+
         with st.form("availability_form"):
-            updated_hours: dict[str, float] = {}
+            updated_windows: dict[str, dict] = {}
 
-            left, right = st.columns(2)
+            for day_name in DAYS:
+                values = availability[day_name]
+                enabled_value = bool(values["enabled"])
 
-            for index, day_name in enumerate(DAYS):
-                target = left if index < 4 else right
+                day_col, start_col, end_col = st.columns([1.1, 1, 1])
 
-                with target:
-                    updated_hours[day_name] = st.slider(
+                with day_col:
+                    enabled = st.checkbox(
                         day_name,
-                        min_value=0.0,
-                        max_value=8.0,
-                        value=float(availability[day_name]),
-                        step=0.5,
+                        value=enabled_value,
+                        key=f"available_{day_name}",
                     )
 
-            save_hours = st.form_submit_button(
-                "Save available hours",
+                with start_col:
+                    start_value = st.time_input(
+                        f"{day_name} start",
+                        value=time.fromisoformat(values["start"]),
+                        key=f"start_{day_name}",
+                        disabled=not enabled,
+                        label_visibility="collapsed",
+                    )
+
+                with end_col:
+                    end_value = st.time_input(
+                        f"{day_name} end",
+                        value=time.fromisoformat(values["end"]),
+                        key=f"end_{day_name}",
+                        disabled=not enabled,
+                        label_visibility="collapsed",
+                    )
+
+                updated_windows[day_name] = {
+                    "enabled": enabled,
+                    "start": start_value.strftime("%H:%M"),
+                    "end": end_value.strftime("%H:%M"),
+                }
+
+            save_times = st.form_submit_button(
+                "Save weekly study times",
                 type="primary",
                 use_container_width=True,
             )
 
-        if save_hours:
-            save_availability(updated_hours)
-            st.success("Available hours saved.")
-            st.rerun()
+        if save_times:
+            invalid_days = [
+                day_name
+                for day_name, values in updated_windows.items()
+                if values["enabled"]
+                and time.fromisoformat(values["end"])
+                <= time.fromisoformat(values["start"])
+            ]
+
+            if invalid_days:
+                st.error(
+                    "The end time must be later than the start time for: "
+                    + ", ".join(invalid_days)
+                )
+            else:
+                save_availability(updated_windows)
+                st.success("Weekly study times saved.")
+                st.rerun()
+
+    current_windows = []
+
+    for day_name in DAYS:
+        values = availability[day_name]
+
+        if values["enabled"]:
+            start_text = time.fromisoformat(values["start"]).strftime(
+                "%I:%M %p"
+            ).lstrip("0")
+            end_text = time.fromisoformat(values["end"]).strftime(
+                "%I:%M %p"
+            ).lstrip("0")
+            window_text = f"{start_text}–{end_text}"
+            hours_text = f"{availability_window_hours(values):.1f} hr"
+        else:
+            window_text = "Unavailable"
+            hours_text = "0 hr"
+
+        current_windows.append(
+            {
+                "Day": day_name,
+                "Available Time": window_text,
+                "Length": hours_text,
+            }
+        )
+
+    st.dataframe(
+        pd.DataFrame(current_windows),
+        use_container_width=True,
+        hide_index=True,
+    )
 
     active_tasks = [
         task
@@ -1613,21 +2181,33 @@ def study_plan_page(
 
     if not schedule:
         st.warning(
-            "No sessions could be scheduled. Add available study hours."
+            "No sessions could be scheduled. "
+            "Choose at least one future study-time window."
         )
         return
 
-    total_hours = sum(
-        float(row["Study Time"].replace(" hr", ""))
-        for row in schedule
-    )
+    total_minutes = 0
 
-    c1, c2, c3 = st.columns(3)
+    for row in schedule:
+        study_text = row["Study Time"]
+
+        if study_text.endswith(" hr"):
+            total_minutes += int(
+                round(float(study_text.replace(" hr", "")) * 60)
+            )
+        else:
+            total_minutes += int(study_text.replace(" min", ""))
+
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Study sessions", len(schedule))
-    c2.metric("Scheduled hours", f"{total_hours:.1f}")
+    c2.metric("Scheduled hours", f"{total_minutes / 60:.1f}")
     c3.metric(
         "Tasks included",
         len({row["Task"] for row in schedule}),
+    )
+    c4.metric(
+        "Available this week",
+        f"{sum(availability_window_hours(v) for v in availability.values()):.1f} hr",
     )
 
     display_rows = []
@@ -1637,6 +2217,7 @@ def study_plan_page(
             {
                 "Date": row["Date"].strftime("%b %d, %Y"),
                 "Day": row["Day"],
+                "Time": row["Time"],
                 "Subject": row["Subject"],
                 "Task": row["Task"],
                 "Study Time": row["Study Time"],
@@ -1677,8 +2258,8 @@ def study_plan_page(
                 st.markdown(
                     f"""
                     <div class="session-card">
-                        <strong>{safe_subject}: {safe_task}</strong><br>
-                        <span style="color:#b8ccca;">
+                        <strong>{session["Time"]} · {safe_subject}: {safe_task}</strong><br>
+                        <span style="color:var(--text-soft);">
                             {session["Study Time"]} ·
                             {session["Priority"]} priority ·
                             {session["Status"]}
@@ -1689,9 +2270,10 @@ def study_plan_page(
                 )
 
     if warnings:
-        st.warning("Some work did not fit into the available hours.")
+        st.warning("Some work did not fit into the available times.")
         for warning in warnings:
             st.write(f"• {warning}")
+
 
 
 # ---------------------------------------------------------
@@ -1714,6 +2296,25 @@ with st.sidebar:
         """,
         unsafe_allow_html=True,
     )
+
+    st.markdown(
+        '<div class="theme-label">Appearance</div>',
+        unsafe_allow_html=True,
+    )
+
+    dark_mode_enabled = st.toggle(
+        "🌙 Dark mode",
+        value=st.session_state.app_theme == "Dark",
+        help="Turn this off to use the high-contrast light theme.",
+    )
+
+    requested_theme = "Dark" if dark_mode_enabled else "Light"
+
+    if requested_theme != st.session_state.app_theme:
+        st.session_state.app_theme = requested_theme
+        st.rerun()
+
+    st.divider()
 
     page = st.radio(
         "Navigation",
