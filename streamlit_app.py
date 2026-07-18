@@ -5063,6 +5063,15 @@ def persistent_music_embed_details(
 
 
 def render_persistent_music_overlay() -> None:
+    """
+    Render the persistent floating music player.
+
+    The overlay is inserted into Streamlit's parent document so it stays
+    visible during page navigation. Control handlers are rebound on every
+    rerun because callbacks created by an older component iframe can stop
+    working after that iframe is replaced.
+    """
+
     initialize_music_state()
 
     persistence_enabled = bool(
@@ -5087,9 +5096,7 @@ def render_persistent_music_overlay() -> None:
     )
 
     details = (
-        persistent_music_embed_details(
-            url
-        )
+        persistent_music_embed_details(url)
         if active and url
         else None
     )
@@ -5097,23 +5104,42 @@ def render_persistent_music_overlay() -> None:
     overlay_id = (
         "studyflow-persistent-music-overlay"
     )
+    minimized_key = (
+        "studyflowMusicOverlayMinimized"
+    )
+    position_key = (
+        "studyflowMusicOverlayPosition"
+    )
+    closed_token_key = (
+        "studyflowMusicOverlayClosedToken"
+    )
 
     if details is None:
         components.html(
             f"""
             <script>
                 try {{
+                    const parentWindow = window.parent;
+                    const parentDocument =
+                        parentWindow.document;
                     const existing =
-                        window.parent.document
-                        .getElementById(
+                        parentDocument.getElementById(
                             {json.dumps(overlay_id)}
                         );
 
                     if (existing) {{
                         existing.remove();
                     }}
+
+                    parentWindow.localStorage.removeItem(
+                        {json.dumps(closed_token_key)}
+                    );
                 }} catch (error) {{
-                    console.warn(error);
+                    console.warn(
+                        "StudyFlow could not remove "
+                        + "the music player.",
+                        error
+                    );
                 }}
             </script>
             """,
@@ -5123,15 +5149,14 @@ def render_persistent_music_overlay() -> None:
         return
 
     source_id = (
-        st.session_state[
-            "persistent_music_source_id"
-        ]
+        st.session_state.persistent_music_source_id
         or music_source_id(
             url,
             title,
         )
     )
     token = f"{source_id}|{nonce}"
+
     safe_title = html.escape(title)
     safe_src = html.escape(
         details["src"],
@@ -5150,6 +5175,7 @@ def render_persistent_music_overlay() -> None:
         )
         player_markup = f"""
             <audio
+                class="sf-persistent-audio"
                 controls
                 autoplay
                 {loop_attribute}
@@ -5160,6 +5186,7 @@ def render_persistent_music_overlay() -> None:
     else:
         player_markup = f"""
             <iframe
+                class="sf-persistent-frame"
                 src="{safe_src}"
                 title="{safe_label}"
                 allow="
@@ -5179,44 +5206,73 @@ def render_persistent_music_overlay() -> None:
             </iframe>
         """
 
-    components.html(
-        f"""
-        <script>
-            (() => {{
-                try {{
-                    const doc =
-                        window.parent.document;
-                    const overlayId =
-                        {json.dumps(overlay_id)};
-                    const token =
-                        {json.dumps(token)};
-                    let overlay =
-                        doc.getElementById(
-                            overlayId
-                        );
+    overlay_script = f"""
+    <script>
+        (() => {{
+            try {{
+                const parentWindow = window.parent;
+                const doc = parentWindow.document;
+                const overlayId =
+                    {json.dumps(overlay_id)};
+                const token =
+                    {json.dumps(token)};
+                const minimizedKey =
+                    {json.dumps(minimized_key)};
+                const positionKey =
+                    {json.dumps(position_key)};
+                const closedTokenKey =
+                    {json.dumps(closed_token_key)};
+                const titleText =
+                    {json.dumps(title)};
 
-                    if (
-                        overlay
-                        && overlay.dataset.token
-                        !== token
-                    ) {{
-                        overlay.remove();
-                        overlay = null;
-                    }}
+                let overlay =
+                    doc.getElementById(overlayId);
 
-                    if (overlay) {{
-                        return;
-                    }}
+                if (
+                    overlay
+                    && overlay.dataset.token !== token
+                ) {{
+                    overlay.remove();
+                    overlay = null;
+                    parentWindow.localStorage.removeItem(
+                        closedTokenKey
+                    );
+                }}
 
+                const closedToken =
+                    parentWindow.localStorage.getItem(
+                        closedTokenKey
+                    );
+
+                if (
+                    !overlay
+                    && closedToken === token
+                ) {{
+                    return;
+                }}
+
+                if (!overlay) {{
                     overlay =
-                        doc.createElement("div");
+                        doc.createElement("section");
                     overlay.id = overlayId;
                     overlay.dataset.token = token;
+                    overlay.dataset.minimized =
+                        parentWindow.localStorage.getItem(
+                            minimizedKey
+                        ) === "true"
+                        ? "true"
+                        : "false";
+
                     overlay.innerHTML = `
                         <div class="sf-music-header">
                             <div class="sf-music-name">
-                                <span>♫</span>
-                                <strong>
+                                <span
+                                    class="sf-music-icon"
+                                    aria-hidden="true">
+                                    ♫
+                                </span>
+                                <strong
+                                    class="sf-music-title">
                                     {safe_title}
                                 </strong>
                             </div>
@@ -5224,12 +5280,17 @@ def render_persistent_music_overlay() -> None:
                             <div class="sf-music-actions">
                                 <button
                                     class="sf-minimize"
-                                    type="button">
+                                    type="button"
+                                    aria-label="Minimize player"
+                                    title="Minimize player">
                                     −
                                 </button>
+
                                 <button
                                     class="sf-close"
-                                    type="button">
+                                    type="button"
+                                    aria-label="Close player"
+                                    title="Close player">
                                     ×
                                 </button>
                             </div>
@@ -5240,291 +5301,553 @@ def render_persistent_music_overlay() -> None:
                         </div>
                     `;
 
-                    const styleId =
-                        "studyflow-persistent-"
-                        + "music-style";
+                    doc.body.appendChild(overlay);
 
-                    if (
-                        !doc.getElementById(
-                            styleId
-                        )
-                    ) {{
-                        const style =
-                            doc.createElement(
-                                "style"
+                    try {{
+                        const savedPosition =
+                            JSON.parse(
+                                parentWindow.localStorage
+                                .getItem(positionKey)
+                                || "null"
                             );
-                        style.id = styleId;
-                        style.textContent = `
-                            #${{overlayId}} {{
-                                position: fixed;
-                                right: 22px;
-                                bottom: 22px;
-                                width: min(
-                                    390px,
-                                    calc(100vw - 32px)
-                                );
-                                z-index: 2147483000;
-                                overflow: hidden;
-                                border: 1px solid
-                                    rgba(
-                                        45,
-                                        212,
-                                        191,
-                                        0.55
-                                    );
-                                border-radius: 18px;
-                                color: #f4fbfa;
-                                background: #0d2226;
-                                box-shadow:
-                                    0 20px 60px
-                                    rgba(0,0,0,0.48);
-                                font-family:
-                                    Arial,
-                                    Helvetica,
-                                    sans-serif;
-                            }}
 
-                            #${{overlayId}}
-                            .sf-music-header {{
-                                display: flex;
-                                align-items: center;
-                                justify-content:
-                                    space-between;
-                                gap: 10px;
-                                min-height: 50px;
-                                padding: 9px 11px;
-                                cursor: move;
-                                user-select: none;
-                                background:
-                                    linear-gradient(
-                                        135deg,
-                                        #0f766e,
-                                        #115e59
-                                    );
-                            }}
+                        if (
+                            savedPosition
+                            && Number.isFinite(
+                                savedPosition.left
+                            )
+                            && Number.isFinite(
+                                savedPosition.top
+                            )
+                        ) {{
+                            const maxLeft = Math.max(
+                                0,
+                                doc.documentElement
+                                .clientWidth
+                                - overlay.offsetWidth
+                            );
+                            const maxTop = Math.max(
+                                0,
+                                doc.documentElement
+                                .clientHeight
+                                - overlay.offsetHeight
+                            );
 
-                            #${{overlayId}}
-                            .sf-music-name {{
-                                display: flex;
-                                align-items: center;
-                                gap: 8px;
-                                min-width: 0;
-                                overflow: hidden;
-                            }}
-
-                            #${{overlayId}}
-                            .sf-music-name strong {{
-                                overflow: hidden;
-                                color: #ffffff;
-                                font-size: 14px;
-                                text-overflow:
-                                    ellipsis;
-                                white-space: nowrap;
-                            }}
-
-                            #${{overlayId}}
-                            .sf-music-actions {{
-                                display: flex;
-                                gap: 6px;
-                            }}
-
-                            #${{overlayId}}
-                            .sf-music-actions button {{
-                                width: 32px;
-                                height: 32px;
-                                padding: 0;
-                                border: 1px solid
-                                    rgba(
-                                        255,
-                                        255,
-                                        255,
-                                        0.35
-                                    );
-                                border-radius: 999px;
-                                color: #ffffff;
-                                background:
-                                    rgba(0,0,0,0.18);
-                                font-size: 19px;
-                                font-weight: 800;
-                                cursor: pointer;
-                            }}
-
-                            #${{overlayId}}
-                            .sf-music-body {{
-                                padding: 11px;
-                                background: #0d2226;
-                            }}
-
-                            #${{overlayId}}.minimized
-                            .sf-music-body {{
-                                display: none;
-                            }}
-
-                            @media (
-                                max-width: 650px
-                            ) {{
-                                #${{overlayId}} {{
-                                    right: 12px;
-                                    bottom: 12px;
-                                    width:
-                                        calc(
-                                            100vw - 24px
-                                        );
-                                }}
-                            }}
-                        `;
-
-                        doc.head.appendChild(
-                            style
+                            overlay.style.right = "auto";
+                            overlay.style.bottom = "auto";
+                            overlay.style.left =
+                                `${{Math.max(
+                                    0,
+                                    Math.min(
+                                        maxLeft,
+                                        savedPosition.left
+                                    )
+                                )}}px`;
+                            overlay.style.top =
+                                `${{Math.max(
+                                    0,
+                                    Math.min(
+                                        maxTop,
+                                        savedPosition.top
+                                    )
+                                )}}px`;
+                        }}
+                    }} catch (error) {{
+                        parentWindow.localStorage.removeItem(
+                            positionKey
                         );
                     }}
-
-                    doc.body.appendChild(
-                        overlay
-                    );
-
-                    const minimizeButton =
+                }} else {{
+                    const titleElement =
                         overlay.querySelector(
-                            ".sf-minimize"
-                        );
-                    const closeButton =
-                        overlay.querySelector(
-                            ".sf-close"
-                        );
-                    const header =
-                        overlay.querySelector(
-                            ".sf-music-header"
+                            ".sf-music-title"
                         );
 
-                    minimizeButton.addEventListener(
-                        "click",
-                        () => {{
-                            overlay.classList.toggle(
-                                "minimized"
-                            );
-                            minimizeButton.textContent =
-                                overlay.classList
-                                .contains(
-                                    "minimized"
-                                )
-                                ? "+"
-                                : "−";
-                        }}
-                    );
-
-                    closeButton.addEventListener(
-                        "click",
-                        () => {{
-                            overlay.remove();
-                        }}
-                    );
-
-                    let dragging = false;
-                    let startX = 0;
-                    let startY = 0;
-                    let startLeft = 0;
-                    let startTop = 0;
-
-                    header.addEventListener(
-                        "pointerdown",
-                        event => {{
-                            if (
-                                event.target.closest(
-                                    "button"
-                                )
-                            ) {{
-                                return;
-                            }}
-
-                            dragging = true;
-                            const rectangle =
-                                overlay
-                                .getBoundingClientRect();
-                            startX = event.clientX;
-                            startY = event.clientY;
-                            startLeft =
-                                rectangle.left;
-                            startTop =
-                                rectangle.top;
-
-                            overlay.style.right =
-                                "auto";
-                            overlay.style.bottom =
-                                "auto";
-                            overlay.style.left =
-                                `${{startLeft}}px`;
-                            overlay.style.top =
-                                `${{startTop}}px`;
-
-                            header
-                                .setPointerCapture(
-                                    event.pointerId
-                                );
-                        }}
-                    );
-
-                    header.addEventListener(
-                        "pointermove",
-                        event => {{
-                            if (!dragging) {{
-                                return;
-                            }}
-
-                            const nextLeft =
-                                startLeft
-                                + event.clientX
-                                - startX;
-                            const nextTop =
-                                startTop
-                                + event.clientY
-                                - startY;
-
-                            overlay.style.left =
-                                `${{Math.max(
-                                    0,
-                                    Math.min(
-                                        doc
-                                        .documentElement
-                                        .clientWidth
-                                        - overlay
-                                        .offsetWidth,
-                                        nextLeft
-                                    )
-                                )}}px`;
-                            overlay.style.top =
-                                `${{Math.max(
-                                    0,
-                                    Math.min(
-                                        doc
-                                        .documentElement
-                                        .clientHeight
-                                        - overlay
-                                        .offsetHeight,
-                                        nextTop
-                                    )
-                                )}}px`;
-                        }}
-                    );
-
-                    header.addEventListener(
-                        "pointerup",
-                        event => {{
-                            dragging = false;
-                            header
-                                .releasePointerCapture(
-                                    event.pointerId
-                                );
-                        }}
-                    );
-                }} catch (error) {{
-                    console.warn(error);
+                    if (titleElement) {{
+                        titleElement.textContent =
+                            titleText;
+                    }}
                 }}
-            }})();
-        </script>
-        """,
+
+                const styleId =
+                    "studyflow-reliable-music-style";
+
+                if (!doc.getElementById(styleId)) {{
+                    const style =
+                        doc.createElement("style");
+                    style.id = styleId;
+                    style.textContent = `
+                        #${{overlayId}} {{
+                            position: fixed;
+                            right: 22px;
+                            bottom: 22px;
+                            width: min(
+                                390px,
+                                calc(100vw - 32px)
+                            );
+                            z-index: 2147483000;
+                            overflow: hidden;
+                            border: 1px solid
+                                rgba(45,212,191,0.58);
+                            border-radius: 18px;
+                            color: #f4fbfa;
+                            background: #0d2226;
+                            box-shadow:
+                                0 20px 60px
+                                rgba(0,0,0,0.48);
+                            font-family:
+                                Arial,
+                                Helvetica,
+                                sans-serif;
+                            transition:
+                                width 150ms ease,
+                                box-shadow 150ms ease;
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-header {{
+                            display: flex;
+                            align-items: center;
+                            justify-content:
+                                space-between;
+                            gap: 10px;
+                            min-height: 52px;
+                            padding: 9px 11px;
+                            cursor: move;
+                            user-select: none;
+                            touch-action: none;
+                            background:
+                                linear-gradient(
+                                    135deg,
+                                    #0f766e,
+                                    #115e59
+                                );
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-name {{
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                            min-width: 0;
+                            overflow: hidden;
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-icon {{
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 30px;
+                            height: 30px;
+                            flex: 0 0 auto;
+                            border-radius: 9px;
+                            color: #032421;
+                            background: #5eead4;
+                            font-weight: 900;
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-title {{
+                            overflow: hidden;
+                            color: #ffffff;
+                            font-size: 14px;
+                            text-overflow:
+                                ellipsis;
+                            white-space: nowrap;
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-actions {{
+                            display: flex;
+                            gap: 7px;
+                            flex: 0 0 auto;
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-actions button {{
+                            display: inline-flex;
+                            align-items: center;
+                            justify-content: center;
+                            width: 34px;
+                            height: 34px;
+                            padding: 0;
+                            border: 1px solid
+                                rgba(255,255,255,0.38);
+                            border-radius: 999px;
+                            color: #ffffff;
+                            background:
+                                rgba(0,0,0,0.2);
+                            font-size: 20px;
+                            font-weight: 900;
+                            line-height: 1;
+                            cursor: pointer;
+                            touch-action: manipulation;
+                            -webkit-tap-highlight-color:
+                                transparent;
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-actions button:hover,
+                        #${{overlayId}}
+                        .sf-music-actions button:focus-visible {{
+                            outline: none;
+                            background:
+                                rgba(255,255,255,0.2);
+                            border-color:
+                                rgba(255,255,255,0.7);
+                        }}
+
+                        #${{overlayId}}
+                        .sf-music-body {{
+                            padding: 11px;
+                            background: #0d2226;
+                        }}
+
+                        #${{overlayId}}.minimized {{
+                            width: min(
+                                315px,
+                                calc(100vw - 32px)
+                            );
+                        }}
+
+                        #${{overlayId}}.minimized
+                        .sf-music-body {{
+                            display: none;
+                        }}
+
+                        #${{overlayId}}.sf-dragging {{
+                            transition: none;
+                            box-shadow:
+                                0 26px 75px
+                                rgba(0,0,0,0.58);
+                        }}
+
+                        @media (max-width: 650px) {{
+                            #${{overlayId}} {{
+                                right: 12px;
+                                bottom: 12px;
+                                width:
+                                    calc(100vw - 24px);
+                            }}
+
+                            #${{overlayId}}.minimized {{
+                                width:
+                                    calc(100vw - 24px);
+                            }}
+                        }}
+                    `;
+
+                    doc.head.appendChild(style);
+                }}
+
+                /*
+                 * Rebind every handler on every Streamlit rerun.
+                 * Using on... properties replaces stale handlers
+                 * instead of stacking duplicate listeners.
+                 */
+                const header =
+                    overlay.querySelector(
+                        ".sf-music-header"
+                    );
+                const minimizeButton =
+                    overlay.querySelector(
+                        ".sf-minimize"
+                    );
+                const closeButton =
+                    overlay.querySelector(
+                        ".sf-close"
+                    );
+
+                const applyMinimizedState = () => {{
+                    const minimized =
+                        overlay.dataset.minimized
+                        === "true";
+
+                    overlay.classList.toggle(
+                        "minimized",
+                        minimized
+                    );
+
+                    minimizeButton.textContent =
+                        minimized
+                        ? "+"
+                        : "−";
+                    minimizeButton.setAttribute(
+                        "aria-label",
+                        minimized
+                        ? "Maximize player"
+                        : "Minimize player"
+                    );
+                    minimizeButton.title =
+                        minimized
+                        ? "Maximize player"
+                        : "Minimize player";
+                }};
+
+                applyMinimizedState();
+
+                minimizeButton.onpointerdown = (
+                    event
+                ) => {{
+                    event.stopPropagation();
+                }};
+
+                minimizeButton.onclick = (
+                    event
+                ) => {{
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    const nextValue =
+                        overlay.dataset.minimized
+                        !== "true";
+
+                    overlay.dataset.minimized =
+                        nextValue
+                        ? "true"
+                        : "false";
+
+                    parentWindow.localStorage.setItem(
+                        minimizedKey,
+                        nextValue
+                        ? "true"
+                        : "false"
+                    );
+
+                    applyMinimizedState();
+                }};
+
+                closeButton.onpointerdown = (
+                    event
+                ) => {{
+                    event.stopPropagation();
+                }};
+
+                closeButton.onclick = (
+                    event
+                ) => {{
+                    event.preventDefault();
+                    event.stopPropagation();
+
+                    parentWindow.localStorage.setItem(
+                        closedTokenKey,
+                        token
+                    );
+                    overlay.remove();
+                }};
+
+                let dragging = false;
+                let pointerId = null;
+                let startX = 0;
+                let startY = 0;
+                let startLeft = 0;
+                let startTop = 0;
+
+                const finishDrag = (
+                    event
+                ) => {{
+                    if (!dragging) {{
+                        return;
+                    }}
+
+                    dragging = false;
+                    overlay.classList.remove(
+                        "sf-dragging"
+                    );
+
+                    try {{
+                        if (
+                            pointerId !== null
+                            && header.hasPointerCapture(
+                                pointerId
+                            )
+                        ) {{
+                            header.releasePointerCapture(
+                                pointerId
+                            );
+                        }}
+                    }} catch (error) {{
+                        // Pointer capture may already be gone.
+                    }}
+
+                    const rectangle =
+                        overlay.getBoundingClientRect();
+
+                    parentWindow.localStorage.setItem(
+                        positionKey,
+                        JSON.stringify({{
+                            left: rectangle.left,
+                            top: rectangle.top,
+                        }})
+                    );
+
+                    pointerId = null;
+                }};
+
+                header.onpointerdown = (
+                    event
+                ) => {{
+                    if (
+                        event.button !== 0
+                        || event.target.closest(
+                            "button"
+                        )
+                    ) {{
+                        return;
+                    }}
+
+                    event.preventDefault();
+
+                    dragging = true;
+                    pointerId =
+                        event.pointerId;
+
+                    const rectangle =
+                        overlay.getBoundingClientRect();
+
+                    startX = event.clientX;
+                    startY = event.clientY;
+                    startLeft =
+                        rectangle.left;
+                    startTop =
+                        rectangle.top;
+
+                    overlay.style.right = "auto";
+                    overlay.style.bottom = "auto";
+                    overlay.style.left =
+                        `${{startLeft}}px`;
+                    overlay.style.top =
+                        `${{startTop}}px`;
+
+                    overlay.classList.add(
+                        "sf-dragging"
+                    );
+
+                    try {{
+                        header.setPointerCapture(
+                            pointerId
+                        );
+                    }} catch (error) {{
+                        // Dragging still works on most browsers.
+                    }}
+                }};
+
+                header.onpointermove = (
+                    event
+                ) => {{
+                    if (
+                        !dragging
+                        || event.pointerId
+                        !== pointerId
+                    ) {{
+                        return;
+                    }}
+
+                    const maxLeft = Math.max(
+                        0,
+                        doc.documentElement
+                        .clientWidth
+                        - overlay.offsetWidth
+                    );
+                    const maxTop = Math.max(
+                        0,
+                        doc.documentElement
+                        .clientHeight
+                        - overlay.offsetHeight
+                    );
+
+                    const nextLeft =
+                        startLeft
+                        + event.clientX
+                        - startX;
+                    const nextTop =
+                        startTop
+                        + event.clientY
+                        - startY;
+
+                    overlay.style.left =
+                        `${{Math.max(
+                            0,
+                            Math.min(
+                                maxLeft,
+                                nextLeft
+                            )
+                        )}}px`;
+                    overlay.style.top =
+                        `${{Math.max(
+                            0,
+                            Math.min(
+                                maxTop,
+                                nextTop
+                            )
+                        )}}px`;
+                }};
+
+                header.onpointerup =
+                    finishDrag;
+                header.onpointercancel =
+                    finishDrag;
+                header.onlostpointercapture =
+                    finishDrag;
+
+                parentWindow.onresize = () => {{
+                    const rectangle =
+                        overlay.getBoundingClientRect();
+                    const maxLeft = Math.max(
+                        0,
+                        doc.documentElement
+                        .clientWidth
+                        - overlay.offsetWidth
+                    );
+                    const maxTop = Math.max(
+                        0,
+                        doc.documentElement
+                        .clientHeight
+                        - overlay.offsetHeight
+                    );
+
+                    if (
+                        rectangle.left > maxLeft
+                        || rectangle.top > maxTop
+                    ) {{
+                        overlay.style.right = "auto";
+                        overlay.style.bottom = "auto";
+                        overlay.style.left =
+                            `${{Math.max(
+                                0,
+                                Math.min(
+                                    maxLeft,
+                                    rectangle.left
+                                )
+                            )}}px`;
+                        overlay.style.top =
+                            `${{Math.max(
+                                0,
+                                Math.min(
+                                    maxTop,
+                                    rectangle.top
+                                )
+                            )}}px`;
+                    }}
+                }};
+            }} catch (error) {{
+                console.warn(
+                    "StudyFlow could not create "
+                    + "the music player.",
+                    error
+                );
+            }}
+        }})();
+    </script>
+    """
+
+    components.html(
+        overlay_script,
         height=0,
         scrolling=False,
     )
+
 
 
 
