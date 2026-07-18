@@ -720,6 +720,144 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    """
+    <style>
+        .youtube-shell {
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 1rem;
+            background: linear-gradient(145deg, var(--card), var(--card-alt));
+            box-shadow: 0 14px 34px var(--shadow);
+            margin-bottom: 1rem;
+        }
+
+        .youtube-brand-row {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .youtube-play-mark {
+            width: 2.2rem;
+            height: 1.55rem;
+            border-radius: 0.48rem;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            background: #ff0033;
+            font-size: 0.82rem;
+            font-weight: 900;
+            box-shadow: 0 6px 18px rgba(255, 0, 51, 0.24);
+        }
+
+        .youtube-watcher-title {
+            color: var(--text);
+            font-size: 1.35rem;
+            font-weight: 850;
+            letter-spacing: -0.03em;
+        }
+
+        .youtube-watcher-subtitle {
+            color: var(--text-soft);
+            font-size: 0.86rem;
+        }
+
+        .youtube-result-card {
+            min-height: 100%;
+            border: 1px solid var(--border);
+            border-radius: 15px;
+            padding: 0.75rem;
+            background: var(--card-alt);
+            box-shadow: 0 6px 18px var(--shadow);
+            margin-bottom: 0.65rem;
+        }
+
+        .youtube-result-title {
+            color: var(--text);
+            font-size: 0.98rem;
+            line-height: 1.3;
+            font-weight: 780;
+            margin-top: 0.55rem;
+        }
+
+        .youtube-result-meta {
+            color: var(--text-soft);
+            font-size: 0.82rem;
+            line-height: 1.4;
+            margin-top: 0.35rem;
+        }
+
+        .youtube-filter-label {
+            color: var(--text-soft);
+            font-size: 0.78rem;
+            font-weight: 750;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 0.2rem;
+        }
+
+        .youtube-player-box {
+            border: 1px solid var(--border-strong);
+            border-radius: 18px;
+            padding: 0.9rem;
+            background: var(--card-alt);
+            margin: 0.9rem 0 1.1rem;
+        }
+
+        .youtube-player-title {
+            color: var(--text);
+            font-size: 1.08rem;
+            font-weight: 780;
+            margin-bottom: 0.15rem;
+        }
+
+        .youtube-player-meta {
+            color: var(--text-soft);
+            font-size: 0.84rem;
+            margin-bottom: 0.7rem;
+        }
+
+        .youtube-empty {
+            text-align: center;
+            padding: 2.5rem 1rem;
+            border: 1px dashed var(--border-strong);
+            border-radius: 17px;
+            color: var(--text-soft);
+            background: var(--card-alt);
+        }
+
+        .youtube-search-help {
+            color: var(--text-soft);
+            font-size: 0.82rem;
+            margin-top: -0.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .youtube-shell [data-testid="stForm"] {
+            border: 0;
+            padding: 0;
+            background: transparent;
+        }
+
+        .youtube-shell .stTextInput input {
+            min-height: 3rem;
+            font-size: 1rem;
+            border-radius: 999px;
+            padding-left: 1.15rem;
+        }
+
+        .youtube-shell .stButton > button,
+        .youtube-shell .stFormSubmitButton > button {
+            border-radius: 999px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---------------------------------------------------------
 # DATABASE FUNCTIONS
 # ---------------------------------------------------------
@@ -1573,6 +1711,194 @@ def get_recent_youtube_videos(
 
     return videos, errors
 
+
+def resolve_youtube_channel_search(
+    query: str,
+    api_key: str,
+) -> tuple[str, str]:
+    clean_query = query.strip()
+
+    if clean_query.startswith("UC") and len(clean_query) >= 20:
+        payload = youtube_api_request(
+            "channels",
+            {
+                "part": "snippet",
+                "id": clean_query,
+                "maxResults": 1,
+            },
+            api_key,
+        )
+    elif clean_query.startswith("@"):
+        payload = youtube_api_request(
+            "channels",
+            {
+                "part": "snippet",
+                "forHandle": clean_query,
+                "maxResults": 1,
+            },
+            api_key,
+        )
+    else:
+        search_payload = youtube_api_request(
+            "search",
+            {
+                "part": "snippet",
+                "type": "channel",
+                "q": clean_query,
+                "maxResults": 1,
+            },
+            api_key,
+        )
+        channel_items = search_payload.get("items", [])
+
+        if not channel_items:
+            raise RuntimeError(
+                f'No YouTube channel was found for "{clean_query}".'
+            )
+
+        channel_id = channel_items[0].get("id", {}).get("channelId", "")
+
+        if not channel_id:
+            raise RuntimeError(
+                f'No YouTube channel was found for "{clean_query}".'
+            )
+
+        payload = youtube_api_request(
+            "channels",
+            {
+                "part": "snippet",
+                "id": channel_id,
+                "maxResults": 1,
+            },
+            api_key,
+        )
+
+    items = payload.get("items", [])
+
+    if not items:
+        raise RuntimeError(
+            f'No YouTube channel was found for "{clean_query}".'
+        )
+
+    channel = items[0]
+    channel_id = channel.get("id", "")
+    channel_title = (
+        channel.get("snippet", {}).get("title")
+        or clean_query
+    )
+
+    if not channel_id:
+        raise RuntimeError(
+            f'No YouTube channel was found for "{clean_query}".'
+        )
+
+    return channel_id, channel_title
+
+
+def search_youtube_watcher(
+    query: str,
+    api_key: str,
+    search_mode: str,
+    sort_order: str,
+    page_token: str = "",
+    max_results: int = 12,
+) -> tuple[list[dict], str, int, str]:
+    clean_query = query.strip()
+
+    if not clean_query:
+        raise RuntimeError("Enter a channel or topic to search.")
+
+    parameters = {
+        "part": "snippet",
+        "type": "video",
+        "maxResults": max_results,
+        "safeSearch": "moderate",
+        "videoEmbeddable": "true",
+        "videoSyndicated": "true",
+        "order": (
+            "date"
+            if sort_order == "Newest"
+            else "viewCount"
+            if sort_order == "Most viewed"
+            else "relevance"
+        ),
+    }
+
+    resolved_label = clean_query
+
+    if search_mode == "Channel":
+        channel_id, channel_title = resolve_youtube_channel_search(
+            clean_query,
+            api_key,
+        )
+        parameters["channelId"] = channel_id
+        resolved_label = channel_title
+
+        # Channel results are most useful in newest-first order.
+        if sort_order == "Relevant":
+            parameters["order"] = "date"
+    else:
+        parameters["q"] = clean_query
+
+    if page_token:
+        parameters["pageToken"] = page_token
+
+    payload = youtube_api_request(
+        "search",
+        parameters,
+        api_key,
+    )
+
+    videos: list[dict] = []
+
+    for item in payload.get("items", []):
+        video_id = item.get("id", {}).get("videoId")
+        snippet = item.get("snippet", {})
+
+        if not video_id:
+            continue
+
+        thumbnails = snippet.get("thumbnails", {})
+        thumbnail_url = ""
+
+        for size in ("high", "medium", "default"):
+            candidate = thumbnails.get(size, {}).get("url")
+            if candidate:
+                thumbnail_url = candidate
+                break
+
+        videos.append(
+            {
+                "video_id": video_id,
+                "title": html.unescape(
+                    snippet.get("title", "Untitled video")
+                ),
+                "channel": html.unescape(
+                    snippet.get("channelTitle", "Unknown channel")
+                ),
+                "published_at": snippet.get("publishedAt", ""),
+                "description": html.unescape(
+                    snippet.get("description", "")
+                ),
+                "thumbnail": thumbnail_url,
+                "url": (
+                    "https://www.youtube.com/watch"
+                    f"?v={video_id}"
+                ),
+            }
+        )
+
+    next_page_token = payload.get("nextPageToken", "")
+    total_results = int(
+        payload.get("pageInfo", {}).get("totalResults", 0)
+    )
+
+    return (
+        videos,
+        next_page_token,
+        total_results,
+        resolved_label,
+    )
 
 def format_youtube_date(published_at: str) -> str:
     if not published_at:
@@ -2766,235 +3092,243 @@ def study_plan_page(
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
-        "Follow educational YouTube channels, save useful links, "
-        "and open trusted study tools from one place."
+        "Search and watch educational videos, save useful links, "
+        "and open trusted study tools."
     )
 
     youtube_tab, saved_tab, tools_tab = st.tabs(
         [
-            "📺 Recent YouTube Videos",
+            "▶ YouTube Watcher",
             "🔖 My Resources",
             "🧰 Study Tools",
         ]
     )
 
     with youtube_tab:
-        st.markdown(
-            '<div class="section-eyebrow">Selected channels</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown("### Recent educational videos")
-
         youtube_api_key = get_default_youtube_api_key()
 
+        st.markdown(
+            """
+            <div class="youtube-shell">
+                <div class="youtube-brand-row">
+                    <div class="youtube-play-mark">▶</div>
+                    <div>
+                        <div class="youtube-watcher-title">YouTube Watcher</div>
+                        <div class="youtube-watcher-subtitle">
+                            Search a topic or channel and watch videos without leaving StudyFlow.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
         if youtube_api_key:
-            st.success(
-                "YouTube is connected. Recent videos can be loaded below."
-            )
+            st.success("YouTube Watcher is connected.")
         else:
             st.error(
-                "YouTube is not connected. Add YOUTUBE_API_KEY to your "
-                "Streamlit app secrets or Codespaces secrets, then restart the app."
+                "YouTube Watcher is not connected. Add YOUTUBE_API_KEY "
+                "to your Streamlit or Codespaces secrets and restart the app."
             )
 
-        with st.expander(
-            "Manage YouTube channels",
-            expanded=not bool(get_youtube_channels()),
-        ):
+        with st.container(border=True):
             with st.form(
-                "add_youtube_channel_form",
-                clear_on_submit=True,
+                "youtube_watcher_search_form",
+                clear_on_submit=False,
+                border=False,
             ):
-                channel_col, reference_col = st.columns(2)
-
-                with channel_col:
-                    channel_name = st.text_input(
-                        "Channel label",
-                        placeholder="Example: Khan Academy",
-                    )
-
-                with reference_col:
-                    channel_reference = st.text_input(
-                        "Channel @handle, URL, or ID",
-                        placeholder="@KhanAcademy",
-                    )
-
-                add_channel_button = st.form_submit_button(
-                    "Add channel",
-                    type="primary",
-                    use_container_width=True,
+                search_query = st.text_input(
+                    "Search YouTube",
+                    value=st.session_state.get(
+                        "youtube_watcher_query",
+                        "",
+                    ),
+                    placeholder="Search a topic, lesson, creator, or @channel...",
+                    label_visibility="collapsed",
                 )
 
-            if add_channel_button:
-                if (
-                    not channel_name.strip()
-                    or not channel_reference.strip()
-                ):
-                    st.error(
-                        "Enter both a channel label and channel reference."
-                    )
-                else:
-                    success, message = add_youtube_channel(
-                        channel_name,
-                        channel_reference,
-                    )
-
-                    if success:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-
-            saved_channels = get_youtube_channels()
-
-            if saved_channels:
-                channel_rows = [
-                    {
-                        "Channel": channel["channel_name"],
-                        "Reference": channel["channel_reference"],
-                    }
-                    for channel in saved_channels
-                ]
-
-                st.dataframe(
-                    pd.DataFrame(channel_rows),
-                    use_container_width=True,
-                    hide_index=True,
+                st.markdown(
+                    '<div class="youtube-search-help">'
+                    'Examples: “calculus limits,” “Python recursion,” '
+                    '“Khan Academy,” or “@3blue1brown”'
+                    "</div>",
+                    unsafe_allow_html=True,
                 )
 
-                delete_options = {
-                    (
-                        f"{channel['channel_name']} "
-                        f"({channel['channel_reference']})"
-                    ): channel["id"]
-                    for channel in saved_channels
-                }
+                mode_col, order_col, button_col = st.columns(
+                    [1.35, 1.35, 1]
+                )
 
-                delete_col, button_col = st.columns([2, 1])
+                with mode_col:
+                    search_mode = st.radio(
+                        "Search for",
+                        ["Topic", "Channel"],
+                        horizontal=True,
+                        index=(
+                            1
+                            if st.session_state.get(
+                                "youtube_watcher_mode"
+                            ) == "Channel"
+                            else 0
+                        ),
+                    )
 
-                with delete_col:
-                    delete_channel_label = st.selectbox(
-                        "Remove a channel",
-                        list(delete_options.keys()),
-                        key="delete_channel_selector",
+                with order_col:
+                    sort_order = st.selectbox(
+                        "Sort",
+                        ["Relevant", "Newest", "Most viewed"],
+                        index=(
+                            ["Relevant", "Newest", "Most viewed"].index(
+                                st.session_state.get(
+                                    "youtube_watcher_order",
+                                    "Relevant",
+                                )
+                            )
+                        ),
                     )
 
                 with button_col:
                     st.write("")
-                    st.write("")
-
-                    if st.button(
-                        "Remove channel",
+                    search_submitted = st.form_submit_button(
+                        "🔍 Search",
+                        type="primary",
                         use_container_width=True,
-                    ):
-                        delete_youtube_channel(
-                            delete_options[delete_channel_label]
-                        )
-                        st.success("Channel removed.")
-                        st.rerun()
-
-        channels = get_youtube_channels()
-
-        if not channels:
-            st.info(
-                "Add at least one educational YouTube channel "
-                "to display recent uploads."
-            )
-        else:
-            channel_lookup = {
-                (
-                    f"{channel['channel_name']} "
-                    f"({channel['channel_reference']})"
-                ): channel
-                for channel in channels
-            }
-
-            selected_channel_labels = st.multiselect(
-                "Channels to include",
-                list(channel_lookup.keys()),
-                default=list(channel_lookup.keys()),
-            )
-
-            videos_per_channel = st.select_slider(
-                "Videos per channel",
-                options=[1, 2, 3, 4, 5],
-                value=3,
-            )
-
-            fetch_videos = st.button(
-                "Refresh recent videos",
-                type="primary",
-                use_container_width=True,
-            )
-
-            if fetch_videos:
-                if not youtube_api_key:
-                    st.error(
-                        "YouTube is not connected. Add YOUTUBE_API_KEY to your app secrets first."
                     )
-                elif not selected_channel_labels:
-                    st.error(
-                        "Select at least one channel."
-                    )
-                else:
-                    selected_channels = [
-                        channel_lookup[label]
-                        for label in selected_channel_labels
-                    ]
 
-                    with st.spinner(
-                        "Loading recent channel uploads..."
-                    ):
-                        videos, errors = get_recent_youtube_videos(
-                            selected_channels,
-                            youtube_api_key,
-                            videos_per_channel,
-                        )
-
-                    st.session_state.recent_youtube_videos = videos
-                    st.session_state.youtube_video_errors = errors
-
-            videos = st.session_state.get(
-                "recent_youtube_videos",
-                [],
-            )
-            video_errors = st.session_state.get(
-                "youtube_video_errors",
-                [],
-            )
-
-            for error_message in video_errors:
-                st.warning(error_message)
-
-            if videos:
-                video_options = {
-                    (
-                        f"{video['title']} — {video['channel']}"
-                    ): video
-                    for video in videos
-                }
-
-                selected_video_label = st.selectbox(
-                    "Watch inside StudyFlow",
-                    list(video_options.keys()),
+        if search_submitted:
+            if not youtube_api_key:
+                st.error(
+                    "YouTube Watcher is not connected yet."
                 )
-                selected_video = video_options[
-                    selected_video_label
-                ]
+            elif not search_query.strip():
+                st.warning(
+                    "Enter a topic or channel before searching."
+                )
+            else:
+                try:
+                    with st.spinner("Searching YouTube..."):
+                        (
+                            videos,
+                            next_page_token,
+                            total_results,
+                            resolved_label,
+                        ) = search_youtube_watcher(
+                            search_query,
+                            youtube_api_key,
+                            search_mode,
+                            sort_order,
+                            max_results=12,
+                        )
 
-                st.video(selected_video["url"])
+                    st.session_state.youtube_watcher_query = (
+                        search_query.strip()
+                    )
+                    st.session_state.youtube_watcher_mode = (
+                        search_mode
+                    )
+                    st.session_state.youtube_watcher_order = (
+                        sort_order
+                    )
+                    st.session_state.youtube_watcher_results = videos
+                    st.session_state.youtube_watcher_next_token = (
+                        next_page_token
+                    )
+                    st.session_state.youtube_watcher_total = (
+                        total_results
+                    )
+                    st.session_state.youtube_watcher_label = (
+                        resolved_label
+                    )
+                    st.session_state.youtube_watcher_selected = (
+                        videos[0] if videos else None
+                    )
+                    st.session_state.youtube_watcher_error = ""
+                except RuntimeError as error:
+                    st.session_state.youtube_watcher_results = []
+                    st.session_state.youtube_watcher_next_token = ""
+                    st.session_state.youtube_watcher_error = str(error)
 
-                st.divider()
-                st.markdown("### Latest uploads")
+        watcher_error = st.session_state.get(
+            "youtube_watcher_error",
+            "",
+        )
 
-                for index in range(0, len(videos), 2):
-                    columns = st.columns(2)
+        if watcher_error:
+            st.error(watcher_error)
 
-                    for column, video in zip(
-                        columns,
-                        videos[index:index + 2],
-                    ):
-                        with column:
+        videos = st.session_state.get(
+            "youtube_watcher_results",
+            [],
+        )
+        selected_video = st.session_state.get(
+            "youtube_watcher_selected"
+        )
+
+        if selected_video:
+            safe_player_title = html.escape(
+                selected_video["title"]
+            )
+            safe_player_channel = html.escape(
+                selected_video["channel"]
+            )
+
+            st.markdown(
+                f"""
+                <div class="youtube-player-box">
+                    <div class="youtube-player-title">
+                        {safe_player_title}
+                    </div>
+                    <div class="youtube-player-meta">
+                        {safe_player_channel} ·
+                        {format_youtube_date(selected_video["published_at"])}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.video(selected_video["url"])
+
+        if videos:
+            result_label = html.escape(
+                str(
+                    st.session_state.get(
+                        "youtube_watcher_label",
+                        st.session_state.get(
+                            "youtube_watcher_query",
+                            "",
+                        ),
+                    )
+                )
+            )
+            total_results = st.session_state.get(
+                "youtube_watcher_total",
+                0,
+            )
+
+            st.markdown(
+                f"### Videos for “{result_label}”"
+            )
+            st.caption(
+                f"Showing {len(videos)} result(s)"
+                + (
+                    f" from approximately {total_results:,} matches."
+                    if total_results
+                    else "."
+                )
+            )
+
+            for row_start in range(0, len(videos), 3):
+                columns = st.columns(3)
+                row_videos = videos[row_start:row_start + 3]
+
+                for offset, (column, video) in enumerate(
+                    zip(columns, row_videos)
+                ):
+                    result_index = row_start + offset
+
+                    with column:
+                        with st.container(border=True):
                             if video["thumbnail"]:
                                 st.image(
                                     video["thumbnail"],
@@ -3002,46 +3336,128 @@ def additional_resources_page() -> None:
                                 )
 
                             safe_title = html.escape(
-                                video["title"]
+                                shorten_text(
+                                    video["title"],
+                                    92,
+                                )
                             )
                             safe_channel = html.escape(
                                 video["channel"]
                             )
-                            safe_description = html.escape(
-                                shorten_text(
-                                    video["description"]
-                                )
-                            )
-                            published_text = format_youtube_date(
+                            date_text = format_youtube_date(
                                 video["published_at"]
                             )
 
                             st.markdown(
                                 f"""
-                                <div class="video-card">
-                                    <h4>{safe_title}</h4>
-                                    <div class="resource-description">
-                                        <strong>{safe_channel}</strong> ·
-                                        {published_text}
-                                    </div>
-                                    <div class="video-description"
-                                         style="margin-top:0.45rem;">
-                                        {safe_description or "No description available."}
-                                    </div>
+                                <div class="youtube-result-title">
+                                    {safe_title}
+                                </div>
+                                <div class="youtube-result-meta">
+                                    {safe_channel}<br>
+                                    {date_text}
                                 </div>
                                 """,
                                 unsafe_allow_html=True,
                             )
 
-                            st.link_button(
-                                "Open on YouTube",
-                                video["url"],
-                                use_container_width=True,
-                            )
-            elif youtube_api_key:
-                st.info(
-                    "Press “Refresh recent videos” to load the latest uploads."
+                            watch_col, open_col = st.columns(2)
+
+                            with watch_col:
+                                if st.button(
+                                    "▶ Watch",
+                                    key=(
+                                        "watch_youtube_"
+                                        f"{video['video_id']}_"
+                                        f"{result_index}"
+                                    ),
+                                    use_container_width=True,
+                                ):
+                                    st.session_state[
+                                        "youtube_watcher_selected"
+                                    ] = video
+                                    st.rerun()
+
+                            with open_col:
+                                st.link_button(
+                                    "Open ↗",
+                                    video["url"],
+                                    use_container_width=True,
+                                )
+
+            next_page_token = st.session_state.get(
+                "youtube_watcher_next_token",
+                "",
+            )
+
+            if next_page_token:
+                spacer_left, more_col, spacer_right = st.columns(
+                    [1.5, 1, 1.5]
                 )
+
+                with more_col:
+                    if st.button(
+                        "Show more videos",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        try:
+                            with st.spinner(
+                                "Loading more videos..."
+                            ):
+                                (
+                                    more_videos,
+                                    new_next_token,
+                                    total_results,
+                                    resolved_label,
+                                ) = search_youtube_watcher(
+                                    st.session_state[
+                                        "youtube_watcher_query"
+                                    ],
+                                    youtube_api_key,
+                                    st.session_state[
+                                        "youtube_watcher_mode"
+                                    ],
+                                    st.session_state[
+                                        "youtube_watcher_order"
+                                    ],
+                                    page_token=next_page_token,
+                                    max_results=12,
+                                )
+
+                            existing_ids = {
+                                video["video_id"]
+                                for video in videos
+                            }
+                            unique_more = [
+                                video
+                                for video in more_videos
+                                if video["video_id"]
+                                not in existing_ids
+                            ]
+
+                            st.session_state[
+                                "youtube_watcher_results"
+                            ] = videos + unique_more
+                            st.session_state[
+                                "youtube_watcher_next_token"
+                            ] = new_next_token
+                            st.session_state[
+                                "youtube_watcher_total"
+                            ] = total_results
+                            st.rerun()
+                        except RuntimeError as error:
+                            st.error(str(error))
+        else:
+            st.markdown(
+                """
+                <div class="youtube-empty">
+                    <strong>Search for something to watch.</strong><br>
+                    Find lessons, tutorials, creators, or recent channel uploads.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     with saved_tab:
         st.markdown(
@@ -3095,9 +3511,7 @@ def additional_resources_page() -> None:
                 not resource_title.strip()
                 or not resource_url.strip()
             ):
-                st.error(
-                    "Enter both a title and URL."
-                )
+                st.error("Enter both a title and URL.")
             else:
                 success, message = add_study_resource(
                     resource_title,
@@ -3115,12 +3529,13 @@ def additional_resources_page() -> None:
         resources = get_study_resources()
 
         if not resources:
-            st.info(
-                "Your saved resource library is empty."
-            )
+            st.info("Your saved resource library is empty.")
         else:
             category_options = ["All categories"] + sorted(
-                {resource["category"] for resource in resources}
+                {
+                    resource["category"]
+                    for resource in resources
+                }
             )
 
             resource_category_filter = st.selectbox(
@@ -3177,9 +3592,7 @@ def additional_resources_page() -> None:
                         key=f"delete_resource_{resource['id']}",
                         use_container_width=True,
                     ):
-                        delete_study_resource(
-                            resource["id"]
-                        )
+                        delete_study_resource(resource["id"])
                         st.success("Resource deleted.")
                         st.rerun()
 
@@ -3265,6 +3678,7 @@ def additional_resources_page() -> None:
                         tool["url"],
                         use_container_width=True,
                     )
+
 
 # ---------------------------------------------------------
 # MAIN APP
