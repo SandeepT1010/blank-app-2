@@ -889,6 +889,96 @@ st.markdown(
 )
 
 
+st.markdown(
+    """
+    <style>
+        .music-hero {
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 1.1rem;
+            background:
+                radial-gradient(
+                    circle at 90% 10%,
+                    rgba(45, 212, 191, 0.15),
+                    transparent 15rem
+                ),
+                linear-gradient(
+                    145deg,
+                    var(--card),
+                    var(--card-alt)
+                );
+            box-shadow: 0 14px 34px var(--shadow);
+            margin-bottom: 1rem;
+        }
+
+        .music-hero-row {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .music-mark {
+            width: 2.8rem;
+            height: 2.8rem;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            border-radius: 0.9rem;
+            color: var(--accent-text);
+            background: var(--accent);
+            font-size: 1.25rem;
+            box-shadow: 0 8px 22px var(--shadow);
+        }
+
+        .music-title {
+            color: var(--text);
+            font-size: 1.4rem;
+            font-weight: 850;
+            letter-spacing: -0.03em;
+        }
+
+        .music-subtitle {
+            color: var(--text-soft);
+            font-size: 0.9rem;
+            line-height: 1.45;
+            margin-top: 0.12rem;
+        }
+
+        .music-player-shell {
+            border: 1px solid var(--border-strong);
+            border-radius: 18px;
+            padding: 0.9rem;
+            background: var(--card-alt);
+            box-shadow: 0 10px 26px var(--shadow);
+            margin: 0.8rem 0 1rem;
+        }
+
+        .music-help-card {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 0.8rem 0.9rem;
+            color: var(--text-soft);
+            background: var(--card-alt);
+            line-height: 1.5;
+            margin-bottom: 0.8rem;
+        }
+
+        .music-supported {
+            display: inline-block;
+            padding: 0.25rem 0.55rem;
+            margin: 0.15rem 0.2rem 0.15rem 0;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--text-soft);
+            background: var(--card-hover);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---------------------------------------------------------
 # DATABASE FUNCTIONS
 # ---------------------------------------------------------
@@ -3969,6 +4059,761 @@ def render_youtube_short_suggestions(
                         st.rerun()
 
 
+def initialize_music_state() -> None:
+    defaults = {
+        "music_embed_url": "",
+        "music_embed_error": "",
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def normalize_music_url(url: str) -> str:
+    clean_url = url.strip()
+
+    if not clean_url:
+        return ""
+
+    if not clean_url.startswith(
+        ("http://", "https://")
+    ):
+        clean_url = "https://" + clean_url
+
+    return clean_url
+
+
+def spotify_embed_details(
+    url: str,
+) -> tuple[str, int] | None:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return None
+
+    hostname = parsed.netloc.lower()
+
+    if hostname not in {
+        "open.spotify.com",
+        "www.open.spotify.com",
+    }:
+        return None
+
+    path_parts = [
+        part
+        for part in parsed.path.split("/")
+        if part
+    ]
+
+    if len(path_parts) < 2:
+        return None
+
+    item_type = path_parts[0].lower()
+    item_id = path_parts[1]
+
+    supported_types = {
+        "track",
+        "album",
+        "playlist",
+        "artist",
+        "show",
+        "episode",
+    }
+
+    if (
+        item_type not in supported_types
+        or not re.fullmatch(
+            r"[A-Za-z0-9]+",
+            item_id,
+        )
+    ):
+        return None
+
+    embed_url = (
+        "https://open.spotify.com/embed/"
+        f"{item_type}/{item_id}"
+        "?utm_source=generator&theme=0"
+    )
+
+    compact_types = {
+        "track",
+        "episode",
+    }
+    player_height = (
+        176
+        if item_type in compact_types
+        else 420
+    )
+
+    return embed_url, player_height
+
+
+def youtube_embed_details(
+    url: str,
+) -> tuple[str, str] | None:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return None
+
+    hostname = parsed.netloc.lower().replace(
+        "www.",
+        "",
+    )
+    query = urllib.parse.parse_qs(
+        parsed.query
+    )
+
+    if hostname == "youtu.be":
+        video_id = parsed.path.strip("/")
+
+        if re.fullmatch(
+            r"[A-Za-z0-9_-]{6,}",
+            video_id,
+        ):
+            return "video", (
+                "https://www.youtube.com/watch"
+                f"?v={video_id}"
+            )
+
+        return None
+
+    if hostname not in {
+        "youtube.com",
+        "music.youtube.com",
+        "m.youtube.com",
+    }:
+        return None
+
+    playlist_id = query.get("list", [""])[0]
+    video_id = query.get("v", [""])[0]
+
+    if (
+        parsed.path == "/playlist"
+        and re.fullmatch(
+            r"[A-Za-z0-9_-]{6,}",
+            playlist_id,
+        )
+    ):
+        return "playlist", (
+            "https://www.youtube.com/embed/"
+            "videoseries"
+            f"?list={playlist_id}"
+        )
+
+    if (
+        parsed.path == "/watch"
+        and re.fullmatch(
+            r"[A-Za-z0-9_-]{6,}",
+            video_id,
+        )
+    ):
+        return "video", (
+            "https://www.youtube.com/watch"
+            f"?v={video_id}"
+        )
+
+    if parsed.path.startswith("/shorts/"):
+        short_id = parsed.path.split(
+            "/shorts/",
+            1,
+        )[1].split("/", 1)[0]
+
+        if re.fullmatch(
+            r"[A-Za-z0-9_-]{6,}",
+            short_id,
+        ):
+            return "video", (
+                "https://www.youtube.com/watch"
+                f"?v={short_id}"
+            )
+
+    return None
+
+
+def direct_audio_url(
+    url: str,
+) -> bool:
+    try:
+        path = urllib.parse.urlparse(
+            url
+        ).path.lower()
+    except ValueError:
+        return False
+
+    return path.endswith(
+        (
+            ".mp3",
+            ".wav",
+            ".ogg",
+            ".m4a",
+            ".aac",
+            ".flac",
+        )
+    )
+
+
+def render_music_from_url(
+    url: str,
+) -> bool:
+    spotify_details = spotify_embed_details(
+        url
+    )
+
+    if spotify_details:
+        embed_url, player_height = (
+            spotify_details
+        )
+        safe_embed_url = html.escape(
+            embed_url,
+            quote=True,
+        )
+
+        components.html(
+            f"""
+            <iframe
+                style="
+                    border-radius:14px;
+                    border:0;
+                    width:100%;
+                "
+                src="{safe_embed_url}"
+                height="{player_height}"
+                allow="
+                    autoplay;
+                    clipboard-write;
+                    encrypted-media;
+                    fullscreen;
+                    picture-in-picture
+                "
+                loading="lazy">
+            </iframe>
+            """,
+            height=player_height + 8,
+            scrolling=False,
+        )
+        return True
+
+    youtube_details = youtube_embed_details(
+        url
+    )
+
+    if youtube_details:
+        content_type, embed_value = (
+            youtube_details
+        )
+
+        if content_type == "playlist":
+            safe_embed_url = html.escape(
+                embed_value,
+                quote=True,
+            )
+            components.html(
+                f"""
+                <iframe
+                    style="
+                        border-radius:14px;
+                        border:0;
+                        width:100%;
+                        aspect-ratio:16/9;
+                    "
+                    src="{safe_embed_url}"
+                    title="YouTube music playlist"
+                    allow="
+                        accelerometer;
+                        autoplay;
+                        clipboard-write;
+                        encrypted-media;
+                        gyroscope;
+                        picture-in-picture;
+                        web-share
+                    "
+                    allowfullscreen>
+                </iframe>
+                """,
+                height=510,
+                scrolling=False,
+            )
+        else:
+            st.video(embed_value)
+
+        return True
+
+    if direct_audio_url(url):
+        st.audio(url)
+        return True
+
+    return False
+
+
+def render_focus_sound_generator(
+    theme_name: str,
+) -> None:
+    is_dark = theme_name == "Dark"
+    page = "#071416" if is_dark else "#f8fbfa"
+    card = "#10272b" if is_dark else "#ffffff"
+    text = "#f4fbfa" if is_dark else "#153a3d"
+    soft = "#b8ccca" if is_dark else "#4e696b"
+    border = (
+        "rgba(144,205,200,0.28)"
+        if is_dark
+        else "rgba(39,91,88,0.24)"
+    )
+
+    components.html(
+        f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                * {{
+                    box-sizing: border-box;
+                }}
+
+                body {{
+                    margin: 0;
+                    padding: 0;
+                    color: {text};
+                    background: transparent;
+                    font-family:
+                        Arial,
+                        Helvetica,
+                        sans-serif;
+                }}
+
+                .sound-card {{
+                    border: 1px solid {border};
+                    border-radius: 16px;
+                    padding: 1rem;
+                    background: {card};
+                }}
+
+                .sound-title {{
+                    font-size: 1rem;
+                    font-weight: 800;
+                    margin-bottom: 0.25rem;
+                }}
+
+                .sound-help {{
+                    color: {soft};
+                    font-size: 0.82rem;
+                    line-height: 1.4;
+                    margin-bottom: 0.8rem;
+                }}
+
+                .controls {{
+                    display: grid;
+                    grid-template-columns:
+                        repeat(3, minmax(0, 1fr));
+                    gap: 0.6rem;
+                }}
+
+                button {{
+                    border: 1px solid {border};
+                    border-radius: 999px;
+                    padding: 0.65rem 0.75rem;
+                    color: {text};
+                    background: {page};
+                    font-weight: 750;
+                    cursor: pointer;
+                }}
+
+                button:hover {{
+                    border-color: #2dd4bf;
+                }}
+
+                .active {{
+                    color: #032421;
+                    background: #2dd4bf;
+                    border-color: #2dd4bf;
+                }}
+
+                .volume-row {{
+                    display: grid;
+                    grid-template-columns:
+                        auto 1fr auto;
+                    gap: 0.7rem;
+                    align-items: center;
+                    margin-top: 0.9rem;
+                    color: {soft};
+                    font-size: 0.82rem;
+                }}
+
+                input[type="range"] {{
+                    width: 100%;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="sound-card">
+                <div class="sound-title">
+                    Browser focus sounds
+                </div>
+                <div class="sound-help">
+                    Generate steady background noise without
+                    loading an external song or playlist.
+                </div>
+
+                <div class="controls">
+                    <button id="whiteButton"
+                            onclick="toggleNoise('white')">
+                        White noise
+                    </button>
+                    <button id="brownButton"
+                            onclick="toggleNoise('brown')">
+                        Brown noise
+                    </button>
+                    <button id="stopButton"
+                            onclick="stopNoise()">
+                        Stop
+                    </button>
+                </div>
+
+                <div class="volume-row">
+                    <span>Quiet</span>
+                    <input
+                        id="volume"
+                        type="range"
+                        min="0"
+                        max="0.35"
+                        step="0.01"
+                        value="0.08"
+                        oninput="updateVolume(this.value)"
+                    >
+                    <span>Loud</span>
+                </div>
+            </div>
+
+            <script>
+                let audioContext = null;
+                let sourceNode = null;
+                let gainNode = null;
+                let currentType = null;
+
+                function ensureContext() {{
+                    if (!audioContext) {{
+                        audioContext = new (
+                            window.AudioContext
+                            || window.webkitAudioContext
+                        )();
+                    }}
+
+                    if (
+                        audioContext.state === "suspended"
+                    ) {{
+                        audioContext.resume();
+                    }}
+                }}
+
+                function createNoiseBuffer(type) {{
+                    const length =
+                        audioContext.sampleRate * 4;
+                    const buffer =
+                        audioContext.createBuffer(
+                            1,
+                            length,
+                            audioContext.sampleRate
+                        );
+                    const data =
+                        buffer.getChannelData(0);
+
+                    if (type === "white") {{
+                        for (
+                            let index = 0;
+                            index < length;
+                            index++
+                        ) {{
+                            data[index] =
+                                Math.random() * 2 - 1;
+                        }}
+                    }} else {{
+                        let lastOutput = 0;
+
+                        for (
+                            let index = 0;
+                            index < length;
+                            index++
+                        ) {{
+                            const white =
+                                Math.random() * 2 - 1;
+                            lastOutput =
+                                (
+                                    lastOutput
+                                    + 0.02 * white
+                                )
+                                / 1.02;
+                            data[index] =
+                                lastOutput * 3.5;
+                        }}
+                    }}
+
+                    return buffer;
+                }}
+
+                function updateButtons() {{
+                    document
+                        .getElementById("whiteButton")
+                        .classList.toggle(
+                            "active",
+                            currentType === "white"
+                        );
+                    document
+                        .getElementById("brownButton")
+                        .classList.toggle(
+                            "active",
+                            currentType === "brown"
+                        );
+                }}
+
+                function startNoise(type) {{
+                    ensureContext();
+                    stopNoise(false);
+
+                    sourceNode =
+                        audioContext.createBufferSource();
+                    sourceNode.buffer =
+                        createNoiseBuffer(type);
+                    sourceNode.loop = true;
+
+                    gainNode =
+                        audioContext.createGain();
+                    gainNode.gain.value = Number(
+                        document.getElementById(
+                            "volume"
+                        ).value
+                    );
+
+                    sourceNode.connect(gainNode);
+                    gainNode.connect(
+                        audioContext.destination
+                    );
+                    sourceNode.start();
+
+                    currentType = type;
+                    updateButtons();
+                }}
+
+                function toggleNoise(type) {{
+                    if (currentType === type) {{
+                        stopNoise();
+                    }} else {{
+                        startNoise(type);
+                    }}
+                }}
+
+                function stopNoise(
+                    update = true
+                ) {{
+                    if (sourceNode) {{
+                        try {{
+                            sourceNode.stop();
+                        }} catch (error) {{
+                            // Source may already be stopped.
+                        }}
+                        sourceNode.disconnect();
+                        sourceNode = null;
+                    }}
+
+                    if (gainNode) {{
+                        gainNode.disconnect();
+                        gainNode = null;
+                    }}
+
+                    currentType = null;
+
+                    if (update) {{
+                        updateButtons();
+                    }}
+                }}
+
+                function updateVolume(value) {{
+                    if (gainNode) {{
+                        gainNode.gain.value =
+                            Number(value);
+                    }}
+                }}
+            </script>
+        </body>
+        </html>
+        """,
+        height=220,
+        scrolling=False,
+    )
+
+
+def focus_music_page() -> None:
+    initialize_music_state()
+
+    st.subheader("Focus Music")
+    st.caption(
+        "Play Spotify or YouTube inside StudyFlow, "
+        "upload your own audio, or use simple focus sounds."
+    )
+
+    st.markdown(
+        """
+        <div class="music-hero">
+            <div class="music-hero-row">
+                <div class="music-mark">♫</div>
+                <div>
+                    <div class="music-title">
+                        Music for focused study
+                    </div>
+                    <div class="music-subtitle">
+                        Paste a playlist, track, or video link
+                        and keep it alongside your planner and timer.
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="music-help-card">
+            <strong>Supported links</strong><br>
+            <span class="music-supported">
+                Spotify tracks
+            </span>
+            <span class="music-supported">
+                Spotify playlists
+            </span>
+            <span class="music-supported">
+                Spotify albums
+            </span>
+            <span class="music-supported">
+                YouTube videos
+            </span>
+            <span class="music-supported">
+                YouTube playlists
+            </span>
+            <span class="music-supported">
+                Direct audio files
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.form(
+        "focus_music_url_form",
+        clear_on_submit=False,
+        border=True,
+    ):
+        music_url = st.text_input(
+            "Spotify, YouTube, or audio URL",
+            value=st.session_state.music_embed_url,
+            placeholder=(
+                "Paste a Spotify playlist, YouTube video, "
+                "YouTube playlist, or direct MP3 link..."
+            ),
+        )
+
+        load_col, clear_col = st.columns(2)
+
+        with load_col:
+            load_clicked = st.form_submit_button(
+                "▶ Load music",
+                type="primary",
+                use_container_width=True,
+            )
+
+        with clear_col:
+            clear_clicked = st.form_submit_button(
+                "Clear player",
+                use_container_width=True,
+            )
+
+    if clear_clicked:
+        st.session_state.music_embed_url = ""
+        st.session_state.music_embed_error = ""
+        st.rerun()
+
+    if load_clicked:
+        normalized_url = normalize_music_url(
+            music_url
+        )
+
+        if not normalized_url:
+            st.session_state.music_embed_error = (
+                "Paste a music link first."
+            )
+        elif (
+            spotify_embed_details(normalized_url)
+            or youtube_embed_details(normalized_url)
+            or direct_audio_url(normalized_url)
+        ):
+            st.session_state.music_embed_url = (
+                normalized_url
+            )
+            st.session_state.music_embed_error = ""
+        else:
+            st.session_state.music_embed_error = (
+                "That link is not recognized. Use a Spotify "
+                "track/playlist/album, a YouTube video/playlist, "
+                "or a direct audio-file URL."
+            )
+
+    if st.session_state.music_embed_error:
+        st.error(
+            st.session_state.music_embed_error
+        )
+
+    if st.session_state.music_embed_url:
+        st.markdown("### Embedded player")
+
+        with st.container(border=True):
+            rendered = render_music_from_url(
+                st.session_state.music_embed_url
+            )
+
+            if not rendered:
+                st.error(
+                    "The player could not be loaded from this link."
+                )
+
+    st.divider()
+
+    upload_col, sounds_col = st.columns(
+        [1, 1]
+    )
+
+    with upload_col:
+        st.markdown("### Upload your own audio")
+        uploaded_audio = st.file_uploader(
+            "Choose an audio file",
+            type=[
+                "mp3",
+                "wav",
+                "ogg",
+                "m4a",
+                "aac",
+                "flac",
+            ],
+            help=(
+                "The selected file remains available only "
+                "during the current app session."
+            ),
+        )
+
+        if uploaded_audio:
+            st.audio(uploaded_audio)
+
+    with sounds_col:
+        st.markdown("### Focus sounds")
+        render_focus_sound_generator(
+            st.session_state.app_theme
+        )
+
+    st.info(
+        "Keep the Focus Music page open while listening. "
+        "Changing pages or causing the app to rerun may restart "
+        "an embedded player."
+    )
+
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
@@ -4841,6 +5686,7 @@ with st.sidebar:
             "➕ Add Task",
             "✅ My Tasks",
             "⏱️ Focus Timer",
+            "🎵 Focus Music",
             "🗓️ Study Plan",
             "📚 Additional Resources",
         ],
@@ -4875,6 +5721,8 @@ elif page == "✅ My Tasks":
     my_tasks_page(tasks)
 elif page == "⏱️ Focus Timer":
     focus_timer_page(tasks)
+elif page == "🎵 Focus Music":
+    focus_music_page()
 elif page == "🗓️ Study Plan":
     study_plan_page(tasks, availability)
 else:
