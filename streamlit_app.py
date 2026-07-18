@@ -1008,7 +1008,9 @@ def initialize_database() -> None:
 
         task_columns = {
             row["name"]
-            for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+            for row in connection.execute(
+                "PRAGMA table_info(tasks)"
+            ).fetchall()
         }
 
         if "studied_hours" not in task_columns:
@@ -1043,7 +1045,8 @@ def initialize_database() -> None:
             connection.execute(
                 """
                 ALTER TABLE availability
-                ADD COLUMN start_time TEXT NOT NULL DEFAULT '16:00'
+                ADD COLUMN start_time TEXT NOT NULL
+                DEFAULT '16:00'
                 """
             )
             added_time_columns = True
@@ -1052,10 +1055,23 @@ def initialize_database() -> None:
             connection.execute(
                 """
                 ALTER TABLE availability
-                ADD COLUMN end_time TEXT NOT NULL DEFAULT '18:00'
+                ADD COLUMN end_time TEXT NOT NULL
+                DEFAULT '18:00'
                 """
             )
             added_time_columns = True
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS availability_windows (
+                day_name TEXT NOT NULL,
+                slot_index INTEGER NOT NULL,
+                start_time TEXT NOT NULL,
+                end_time TEXT NOT NULL,
+                PRIMARY KEY (day_name, slot_index)
+            )
+            """
+        )
 
         connection.execute(
             """
@@ -1102,10 +1118,25 @@ def initialize_database() -> None:
         )
 
         for day_name in DAYS:
-            is_weekend = day_name in {"Saturday", "Sunday"}
-            default_hours = 3.0 if is_weekend else 2.0
-            default_start = "10:00" if is_weekend else "16:00"
-            default_end = "13:00" if is_weekend else "18:00"
+            is_weekend = day_name in {
+                "Saturday",
+                "Sunday",
+            }
+            default_hours = (
+                3.0
+                if is_weekend
+                else 2.0
+            )
+            default_start = (
+                "10:00"
+                if is_weekend
+                else "16:00"
+            )
+            default_end = (
+                "13:00"
+                if is_weekend
+                else "18:00"
+            )
 
             connection.execute(
                 """
@@ -1125,8 +1156,8 @@ def initialize_database() -> None:
                 ),
             )
 
-        # Preserve hours from an older StudyFlow database by converting them
-        # into a matching start/end window the first time this version runs.
+        # Preserve hours from an older database by converting them
+        # into a matching first start/end period.
         if added_time_columns:
             rows = connection.execute(
                 """
@@ -1136,11 +1167,27 @@ def initialize_database() -> None:
             ).fetchall()
 
             for row in rows:
-                is_weekend = row["day_name"] in {"Saturday", "Sunday"}
-                start_value = time(10, 0) if is_weekend else time(16, 0)
-                start_dt = datetime.combine(date.today(), start_value)
-                end_dt = start_dt + timedelta(
-                    hours=max(0.0, float(row["study_hours"]))
+                is_weekend = row["day_name"] in {
+                    "Saturday",
+                    "Sunday",
+                }
+                start_value = (
+                    time(10, 0)
+                    if is_weekend
+                    else time(16, 0)
+                )
+                start_dt = datetime.combine(
+                    date.today(),
+                    start_value,
+                )
+                end_dt = (
+                    start_dt
+                    + timedelta(
+                        hours=max(
+                            0.0,
+                            float(row["study_hours"]),
+                        )
+                    )
                 )
 
                 connection.execute(
@@ -1156,12 +1203,59 @@ def initialize_database() -> None:
                     ),
                 )
 
+        saved_window_count = connection.execute(
+            """
+            SELECT COUNT(*) AS window_count
+            FROM availability_windows
+            """
+        ).fetchone()["window_count"]
+
+        # Migrate each old one-period schedule into slot 0.
+        if int(saved_window_count) == 0:
+            legacy_rows = connection.execute(
+                """
+                SELECT
+                    day_name,
+                    study_hours,
+                    start_time,
+                    end_time
+                FROM availability
+                """
+            ).fetchall()
+
+            for row in legacy_rows:
+                if float(row["study_hours"]) <= 0:
+                    continue
+
+                connection.execute(
+                    """
+                    INSERT OR IGNORE INTO availability_windows (
+                        day_name,
+                        slot_index,
+                        start_time,
+                        end_time
+                    )
+                    VALUES (?, 0, ?, ?)
+                    """,
+                    (
+                        row["day_name"],
+                        row["start_time"],
+                        row["end_time"],
+                    ),
+                )
+
         connection.execute(
             """
-            INSERT OR IGNORE INTO settings (setting_key, setting_value)
+            INSERT OR IGNORE INTO settings (
+                setting_key,
+                setting_value
+            )
             VALUES ('daily_focus_goal', '60')
             """
         )
+
+
+
 
 
 def add_task(
@@ -1283,69 +1377,246 @@ def delete_task(task_id: int) -> None:
         )
 
 
-def availability_window_hours(day_settings: dict) -> float:
+def availability_window_hours(
+    day_settings: dict,
+) -> float:
     if not day_settings.get("enabled", False):
         return 0.0
 
-    start_value = time.fromisoformat(day_settings["start"])
-    end_value = time.fromisoformat(day_settings["end"])
+    total_hours = 0.0
 
-    start_dt = datetime.combine(date.today(), start_value)
-    end_dt = datetime.combine(date.today(), end_value)
+    for window in day_settings.get("windows", []):
+        start_value = time.fromisoformat(
+            window["start"]
+        )
+        end_value = time.fromisoformat(
+            window["end"]
+        )
 
-    return max(0.0, (end_dt - start_dt).total_seconds() / 3600)
+        start_dt = datetime.combine(
+            date.today(),
+            start_value,
+        )
+        end_dt = datetime.combine(
+            date.today(),
+            end_value,
+        )
+
+        total_hours += max(
+            0.0,
+            (
+                end_dt - start_dt
+            ).total_seconds() / 3600,
+        )
+
+    return total_hours
+
 
 
 def get_availability() -> dict[str, dict]:
     with connect() as connection:
-        rows = connection.execute(
+        day_rows = connection.execute(
             """
-            SELECT day_name, study_hours, start_time, end_time
+            SELECT
+                day_name,
+                study_hours,
+                start_time,
+                end_time
             FROM availability
             """
         ).fetchall()
 
-    saved = {
-        row["day_name"]: {
-            "enabled": float(row["study_hours"]) > 0,
-            "start": row["start_time"],
-            "end": row["end_time"],
-        }
-        for row in rows
+        window_rows = connection.execute(
+            """
+            SELECT
+                day_name,
+                slot_index,
+                start_time,
+                end_time
+            FROM availability_windows
+            ORDER BY day_name, slot_index
+            """
+        ).fetchall()
+
+    day_state = {
+        row["day_name"]: dict(row)
+        for row in day_rows
     }
+
+    saved_windows: dict[str, list[dict]] = {
+        day_name: []
+        for day_name in DAYS
+    }
+
+    for row in window_rows:
+        if row["day_name"] not in saved_windows:
+            continue
+
+        saved_windows[row["day_name"]].append(
+            {
+                "start": row["start_time"],
+                "end": row["end_time"],
+            }
+        )
 
     result: dict[str, dict] = {}
 
     for day_name in DAYS:
-        is_weekend = day_name in {"Saturday", "Sunday"}
-        result[day_name] = saved.get(
-            day_name,
-            {
+        is_weekend = day_name in {
+            "Saturday",
+            "Sunday",
+        }
+        default_window = {
+            "start": (
+                "10:00"
+                if is_weekend
+                else "16:00"
+            ),
+            "end": (
+                "13:00"
+                if is_weekend
+                else "18:00"
+            ),
+        }
+
+        saved_day = day_state.get(day_name)
+
+        if saved_day is None:
+            result[day_name] = {
                 "enabled": True,
-                "start": "10:00" if is_weekend else "16:00",
-                "end": "13:00" if is_weekend else "18:00",
-            },
+                "windows": [default_window],
+            }
+            continue
+
+        enabled = (
+            float(saved_day["study_hours"]) > 0
         )
+        windows = saved_windows.get(
+            day_name,
+            [],
+        )
+
+        # Compatibility fallback for a database that still only
+        # contains the older single start/end columns.
+        if enabled and not windows:
+            windows = [
+                {
+                    "start": saved_day["start_time"],
+                    "end": saved_day["end_time"],
+                }
+            ]
+
+        if not windows:
+            windows = [
+                {
+                    "start": (
+                        saved_day["start_time"]
+                        or default_window["start"]
+                    ),
+                    "end": (
+                        saved_day["end_time"]
+                        or default_window["end"]
+                    ),
+                }
+            ]
+
+        result[day_name] = {
+            "enabled": enabled,
+            "windows": windows,
+        }
 
     return result
 
 
-def save_availability(availability: dict[str, dict]) -> None:
+
+def save_availability(
+    availability: dict[str, dict],
+) -> None:
     with connect() as connection:
         for day_name, values in availability.items():
             enabled = bool(values["enabled"])
-            start_value = time.fromisoformat(values["start"])
-            end_value = time.fromisoformat(values["end"])
+            windows = (
+                values.get("windows", [])
+                if enabled
+                else []
+            )
 
-            if enabled:
-                start_dt = datetime.combine(date.today(), start_value)
-                end_dt = datetime.combine(date.today(), end_value)
-                study_hours = max(
-                    0.0,
-                    (end_dt - start_dt).total_seconds() / 3600,
+            sorted_windows = sorted(
+                windows,
+                key=lambda window: window["start"],
+            )
+
+            connection.execute(
+                """
+                DELETE FROM availability_windows
+                WHERE day_name = ?
+                """,
+                (day_name,),
+            )
+
+            study_hours = 0.0
+
+            for slot_index, window in enumerate(
+                sorted_windows
+            ):
+                start_value = time.fromisoformat(
+                    window["start"]
                 )
+                end_value = time.fromisoformat(
+                    window["end"]
+                )
+                start_dt = datetime.combine(
+                    date.today(),
+                    start_value,
+                )
+                end_dt = datetime.combine(
+                    date.today(),
+                    end_value,
+                )
+
+                study_hours += max(
+                    0.0,
+                    (
+                        end_dt - start_dt
+                    ).total_seconds() / 3600,
+                )
+
+                connection.execute(
+                    """
+                    INSERT INTO availability_windows (
+                        day_name,
+                        slot_index,
+                        start_time,
+                        end_time
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        day_name,
+                        slot_index,
+                        window["start"],
+                        window["end"],
+                    ),
+                )
+
+            if sorted_windows:
+                first_start = sorted_windows[0]["start"]
+                last_end = sorted_windows[-1]["end"]
             else:
-                study_hours = 0.0
+                is_weekend = day_name in {
+                    "Saturday",
+                    "Sunday",
+                }
+                first_start = (
+                    "10:00"
+                    if is_weekend
+                    else "16:00"
+                )
+                last_end = (
+                    "13:00"
+                    if is_weekend
+                    else "18:00"
+                )
 
             connection.execute(
                 """
@@ -1364,11 +1635,12 @@ def save_availability(availability: dict[str, dict]) -> None:
                 """,
                 (
                     day_name,
-                    study_hours,
-                    values["start"],
-                    values["end"],
+                    study_hours if enabled else 0.0,
+                    first_start,
+                    last_end,
                 ),
             )
+
 
 
 def get_setting(key: str, fallback: str) -> str:
@@ -2606,9 +2878,12 @@ def generate_weekly_plan(
 ) -> tuple[list[dict], list[str]]:
     today = date.today()
     now = datetime.now()
-    plan_dates = [today + timedelta(days=offset) for offset in range(7)]
+    plan_dates = [
+        today + timedelta(days=offset)
+        for offset in range(7)
+    ]
 
-    day_windows: dict[date, dict] = {}
+    schedule_windows: list[dict] = []
 
     for plan_date in plan_dates:
         weekday = plan_date.strftime("%A")
@@ -2617,80 +2892,144 @@ def generate_weekly_plan(
         if not settings["enabled"]:
             continue
 
-        start_value = time.fromisoformat(settings["start"])
-        end_value = time.fromisoformat(settings["end"])
-        start_dt = datetime.combine(plan_date, start_value)
-        end_dt = datetime.combine(plan_date, end_value)
+        sorted_windows = sorted(
+            settings.get("windows", []),
+            key=lambda window: window["start"],
+        )
 
-        # Do not create sessions in the past for the current day.
-        if plan_date == today and start_dt < now:
-            minute = ((now.minute + 14) // 15) * 15
-            rounded = now.replace(second=0, microsecond=0)
+        for slot_index, window in enumerate(
+            sorted_windows
+        ):
+            start_value = time.fromisoformat(
+                window["start"]
+            )
+            end_value = time.fromisoformat(
+                window["end"]
+            )
+            start_dt = datetime.combine(
+                plan_date,
+                start_value,
+            )
+            end_dt = datetime.combine(
+                plan_date,
+                end_value,
+            )
 
-            if minute >= 60:
-                rounded = rounded.replace(minute=0) + timedelta(hours=1)
-            else:
-                rounded = rounded.replace(minute=minute)
+            # Do not schedule sessions in the past today.
+            if plan_date == today and start_dt < now:
+                minute = (
+                    (now.minute + 14) // 15
+                ) * 15
+                rounded = now.replace(
+                    second=0,
+                    microsecond=0,
+                )
 
-            start_dt = max(start_dt, rounded)
+                if minute >= 60:
+                    rounded = (
+                        rounded.replace(minute=0)
+                        + timedelta(hours=1)
+                    )
+                else:
+                    rounded = rounded.replace(
+                        minute=minute
+                    )
 
-        if end_dt > start_dt:
-            day_windows[plan_date] = {
-                "next_start": start_dt,
-                "end": end_dt,
-            }
+                start_dt = max(
+                    start_dt,
+                    rounded,
+                )
+
+            if end_dt > start_dt:
+                schedule_windows.append(
+                    {
+                        "date": plan_date,
+                        "day": weekday,
+                        "slot_index": slot_index,
+                        "next_start": start_dt,
+                        "end": end_dt,
+                    }
+                )
+
+    schedule_windows.sort(
+        key=lambda window: (
+            window["date"],
+            window["next_start"],
+        )
+    )
 
     active_tasks = [
         task.copy()
         for task in tasks
-        if not task["completed"] and remaining_task_hours(task) > 0
+        if (
+            not task["completed"]
+            and remaining_task_hours(task) > 0
+        )
     ]
 
     for task in active_tasks:
         task["remaining_minutes"] = int(
-            round(remaining_task_hours(task) * 60)
+            round(
+                remaining_task_hours(task) * 60
+            )
         )
         task["score"] = smart_score(task)
 
     active_tasks.sort(
-        key=lambda task: (-task["score"], task["due_date"])
+        key=lambda task: (
+            -task["score"],
+            task["due_date"],
+        )
     )
 
     schedule: list[dict] = []
     warnings: list[str] = []
 
     for task in active_tasks:
-        due_date_value = date.fromisoformat(task["due_date"])
+        due_date_value = date.fromisoformat(
+            task["due_date"]
+        )
 
         if due_date_value < today:
-            allowed_dates = list(day_windows.keys())
+            allowed_windows = schedule_windows
         else:
-            allowed_dates = [
-                plan_date
-                for plan_date in day_windows
-                if plan_date <= due_date_value
+            allowed_windows = [
+                window
+                for window in schedule_windows
+                if window["date"] <= due_date_value
             ]
 
         while task["remaining_minutes"] > 0:
-            possible_dates = []
+            possible_windows = []
 
-            for plan_date in allowed_dates:
-                window = day_windows[plan_date]
+            for window in allowed_windows:
                 free_minutes = int(
-                    (window["end"] - window["next_start"]).total_seconds()
+                    (
+                        window["end"]
+                        - window["next_start"]
+                    ).total_seconds()
                     // 60
                 )
 
                 if free_minutes >= 15:
-                    possible_dates.append(plan_date)
+                    possible_windows.append(window)
 
-            if not possible_dates:
+            if not possible_windows:
                 break
 
-            chosen_date = possible_dates[0]
-            window = day_windows[chosen_date]
+            chosen_window = min(
+                possible_windows,
+                key=lambda window: (
+                    window["date"],
+                    window["next_start"],
+                ),
+            )
             free_minutes = int(
-                (window["end"] - window["next_start"]).total_seconds() // 60
+                (
+                    chosen_window["end"]
+                    - chosen_window["next_start"]
+                ).total_seconds()
+                // 60
             )
 
             session_minutes = min(
@@ -2699,17 +3038,29 @@ def generate_weekly_plan(
                 free_minutes,
             )
 
-            if session_minutes < 15 and task["remaining_minutes"] >= 15:
-                window["next_start"] = window["end"]
+            if (
+                session_minutes < 15
+                and task["remaining_minutes"] >= 15
+            ):
+                chosen_window["next_start"] = (
+                    chosen_window["end"]
+                )
                 continue
 
-            start_dt = window["next_start"]
-            end_dt = start_dt + timedelta(minutes=session_minutes)
+            start_dt = chosen_window[
+                "next_start"
+            ]
+            end_dt = (
+                start_dt
+                + timedelta(
+                    minutes=session_minutes
+                )
+            )
 
             schedule.append(
                 {
-                    "Date": chosen_date,
-                    "Day": chosen_date.strftime("%A"),
+                    "Date": chosen_window["date"],
+                    "Day": chosen_window["day"],
                     "Time": (
                         f"{start_dt.strftime('%I:%M %p').lstrip('0')}"
                         f"–{end_dt.strftime('%I:%M %p').lstrip('0')}"
@@ -2727,24 +3078,37 @@ def generate_weekly_plan(
                 }
             )
 
-            task["remaining_minutes"] -= session_minutes
+            task["remaining_minutes"] -= (
+                session_minutes
+            )
 
-            # A short transition break keeps the generated timetable realistic.
-            next_start = end_dt + timedelta(minutes=10)
-            window["next_start"] = min(next_start, window["end"])
+            # Keep a short transition between sessions inside
+            # the same availability window.
+            chosen_window["next_start"] = min(
+                end_dt + timedelta(minutes=10),
+                chosen_window["end"],
+            )
 
         if task["remaining_minutes"] > 0:
             warnings.append(
-                f"{task['subject']} — {task['task_name']} still needs "
-                f"{task['remaining_minutes'] / 60:.1f} hour(s)."
+                f"{task['subject']} — "
+                f"{task['task_name']} still needs "
+                f"{task['remaining_minutes'] / 60:.1f} "
+                "hour(s)."
             )
 
-    schedule.sort(key=lambda row: (row["Date"], row["_start"]))
+    schedule.sort(
+        key=lambda row: (
+            row["Date"],
+            row["_start"],
+        )
+    )
 
     for row in schedule:
         row.pop("_start", None)
 
     return schedule, warnings
+
 
 
 # ---------------------------------------------------------
@@ -3537,85 +3901,362 @@ def focus_timer_page(tasks: list[dict]) -> None:
             )
 
 
+def format_study_time(
+    value: str,
+) -> str:
+    return time.fromisoformat(value).strftime(
+        "%I:%M %p"
+    ).lstrip("0")
+
+
+def default_extra_study_window(
+    previous_end: time,
+) -> tuple[time, time]:
+    base_date = date.today()
+    previous_end_dt = datetime.combine(
+        base_date,
+        previous_end,
+    )
+
+    start_dt = (
+        previous_end_dt
+        + timedelta(hours=2)
+    )
+    end_dt = (
+        start_dt
+        + timedelta(hours=2)
+    )
+
+    # Keep newly suggested windows inside the same day.
+    if end_dt.date() != base_date:
+        return time(19, 0), time(21, 0)
+
+    return start_dt.time(), end_dt.time()
+
+
+def validate_study_windows(
+    availability: dict[str, dict],
+) -> list[str]:
+    errors: list[str] = []
+
+    for day_name, values in availability.items():
+        if not values["enabled"]:
+            continue
+
+        windows = sorted(
+            values.get("windows", []),
+            key=lambda window: window["start"],
+        )
+
+        if not windows:
+            errors.append(
+                f"{day_name} needs at least one study period."
+            )
+            continue
+
+        converted_windows = []
+
+        for index, window in enumerate(
+            windows,
+            start=1,
+        ):
+            start_value = time.fromisoformat(
+                window["start"]
+            )
+            end_value = time.fromisoformat(
+                window["end"]
+            )
+
+            if end_value <= start_value:
+                errors.append(
+                    f"{day_name}, period {index}: "
+                    "the end time must be later "
+                    "than the start time."
+                )
+                continue
+
+            converted_windows.append(
+                (
+                    start_value,
+                    end_value,
+                    index,
+                )
+            )
+
+        for previous, current in zip(
+            converted_windows,
+            converted_windows[1:],
+        ):
+            if current[0] < previous[1]:
+                errors.append(
+                    f"{day_name}: study periods "
+                    f"{previous[2]} and {current[2]} overlap."
+                )
+
+    return errors
+
+
+def render_weekly_study_times_editor(
+    availability: dict[str, dict],
+) -> None:
+    with st.expander(
+        "Weekly study times",
+        expanded=True,
+    ):
+        st.markdown(
+            "**Add more than one study period on the same day.** "
+            "For example: 4:00–6:00 PM and 8:00–10:00 PM."
+        )
+
+        updated_availability: dict[str, dict] = {}
+
+        for day_name in DAYS:
+            saved_values = availability[day_name]
+            saved_windows = list(
+                saved_values.get("windows", [])
+            )
+
+            if not saved_windows:
+                is_weekend = day_name in {
+                    "Saturday",
+                    "Sunday",
+                }
+                saved_windows = [
+                    {
+                        "start": (
+                            "10:00"
+                            if is_weekend
+                            else "16:00"
+                        ),
+                        "end": (
+                            "13:00"
+                            if is_weekend
+                            else "18:00"
+                        ),
+                    }
+                ]
+
+            enabled_key = (
+                f"study_day_enabled_{day_name}"
+            )
+            count_key = (
+                f"study_period_count_{day_name}"
+            )
+
+            if enabled_key not in st.session_state:
+                st.session_state[enabled_key] = bool(
+                    saved_values["enabled"]
+                )
+
+            if count_key not in st.session_state:
+                st.session_state[count_key] = max(
+                    1,
+                    min(4, len(saved_windows)),
+                )
+
+            with st.container(border=True):
+                (
+                    day_col,
+                    summary_col,
+                    add_col,
+                    remove_col,
+                ) = st.columns(
+                    [1.3, 1.2, 1, 1]
+                )
+
+                with day_col:
+                    enabled = st.checkbox(
+                        day_name,
+                        key=enabled_key,
+                    )
+
+                with summary_col:
+                    period_count = int(
+                        st.session_state[count_key]
+                    )
+                    st.caption(
+                        f"{period_count} study "
+                        + (
+                            "period"
+                            if period_count == 1
+                            else "periods"
+                        )
+                    )
+
+                with add_col:
+                    if st.button(
+                        "＋ Add time",
+                        key=f"add_time_{day_name}",
+                        use_container_width=True,
+                        disabled=(
+                            not enabled
+                            or period_count >= 4
+                        ),
+                    ):
+                        st.session_state[count_key] = (
+                            period_count + 1
+                        )
+                        st.rerun()
+
+                with remove_col:
+                    if st.button(
+                        "− Remove",
+                        key=f"remove_time_{day_name}",
+                        use_container_width=True,
+                        disabled=(
+                            not enabled
+                            or period_count <= 1
+                        ),
+                    ):
+                        st.session_state[count_key] = (
+                            period_count - 1
+                        )
+                        st.rerun()
+
+                day_windows: list[dict] = []
+
+                for slot_index in range(
+                    period_count
+                ):
+                    if slot_index < len(
+                        saved_windows
+                    ):
+                        default_start = (
+                            time.fromisoformat(
+                                saved_windows[
+                                    slot_index
+                                ]["start"]
+                            )
+                        )
+                        default_end = (
+                            time.fromisoformat(
+                                saved_windows[
+                                    slot_index
+                                ]["end"]
+                            )
+                        )
+                    else:
+                        previous_end_key = (
+                            f"study_end_{day_name}_"
+                            f"{slot_index - 1}"
+                        )
+                        previous_end = (
+                            st.session_state.get(
+                                previous_end_key,
+                                time(18, 0),
+                            )
+                        )
+
+                        if not isinstance(
+                            previous_end,
+                            time,
+                        ):
+                            previous_end = time.fromisoformat(
+                                str(previous_end)
+                            )
+
+                        (
+                            default_start,
+                            default_end,
+                        ) = default_extra_study_window(
+                            previous_end
+                        )
+
+                    label_col, start_col, end_col = (
+                        st.columns(
+                            [0.55, 1, 1]
+                        )
+                    )
+
+                    with label_col:
+                        st.markdown(
+                            f"**Period {slot_index + 1}**"
+                        )
+
+                    with start_col:
+                        start_value = st.time_input(
+                            (
+                                f"{day_name} period "
+                                f"{slot_index + 1} start"
+                            ),
+                            value=default_start,
+                            key=(
+                                f"study_start_{day_name}_"
+                                f"{slot_index}"
+                            ),
+                            disabled=not enabled,
+                            label_visibility="collapsed",
+                        )
+
+                    with end_col:
+                        end_value = st.time_input(
+                            (
+                                f"{day_name} period "
+                                f"{slot_index + 1} end"
+                            ),
+                            value=default_end,
+                            key=(
+                                f"study_end_{day_name}_"
+                                f"{slot_index}"
+                            ),
+                            disabled=not enabled,
+                            label_visibility="collapsed",
+                        )
+
+                    day_windows.append(
+                        {
+                            "start": start_value.strftime(
+                                "%H:%M"
+                            ),
+                            "end": end_value.strftime(
+                                "%H:%M"
+                            ),
+                        }
+                    )
+
+                updated_availability[day_name] = {
+                    "enabled": enabled,
+                    "windows": day_windows,
+                }
+
+        if st.button(
+            "Save weekly study times",
+            type="primary",
+            use_container_width=True,
+            key="save_multiple_study_times",
+        ):
+            validation_errors = (
+                validate_study_windows(
+                    updated_availability
+                )
+            )
+
+            if validation_errors:
+                for error in validation_errors:
+                    st.error(error)
+            else:
+                save_availability(
+                    updated_availability
+                )
+                st.success(
+                    "Weekly study times saved."
+                )
+                st.rerun()
+
 def study_plan_page(
     tasks: list[dict],
     availability: dict[str, dict],
 ) -> None:
     st.subheader("Study Plan")
     st.caption(
-        "Choose the exact times you are free each day. "
-        "StudyFlow will place sessions inside those time windows."
+        "Add one or more free-time periods for each day. "
+        "StudyFlow will place sessions inside every saved window."
     )
 
-    with st.expander("Weekly study times", expanded=True):
-        st.markdown(
-            "**Select the days you can study, then choose a start and end time.**"
-        )
+    render_weekly_study_times_editor(
+        availability
+    )
 
-        with st.form("availability_form"):
-            updated_windows: dict[str, dict] = {}
-
-            for day_name in DAYS:
-                values = availability[day_name]
-                enabled_value = bool(values["enabled"])
-
-                day_col, start_col, end_col = st.columns([1.1, 1, 1])
-
-                with day_col:
-                    enabled = st.checkbox(
-                        day_name,
-                        value=enabled_value,
-                        key=f"available_{day_name}",
-                    )
-
-                with start_col:
-                    start_value = st.time_input(
-                        f"{day_name} start",
-                        value=time.fromisoformat(values["start"]),
-                        key=f"start_{day_name}",
-                        disabled=not enabled,
-                        label_visibility="collapsed",
-                    )
-
-                with end_col:
-                    end_value = st.time_input(
-                        f"{day_name} end",
-                        value=time.fromisoformat(values["end"]),
-                        key=f"end_{day_name}",
-                        disabled=not enabled,
-                        label_visibility="collapsed",
-                    )
-
-                updated_windows[day_name] = {
-                    "enabled": enabled,
-                    "start": start_value.strftime("%H:%M"),
-                    "end": end_value.strftime("%H:%M"),
-                }
-
-            save_times = st.form_submit_button(
-                "Save weekly study times",
-                type="primary",
-                use_container_width=True,
-            )
-
-        if save_times:
-            invalid_days = [
-                day_name
-                for day_name, values in updated_windows.items()
-                if values["enabled"]
-                and time.fromisoformat(values["end"])
-                <= time.fromisoformat(values["start"])
-            ]
-
-            if invalid_days:
-                st.error(
-                    "The end time must be later than the start time for: "
-                    + ", ".join(invalid_days)
-                )
-            else:
-                save_availability(updated_windows)
-                st.success("Weekly study times saved.")
-                st.rerun()
 
     current_windows = []
 
@@ -3623,14 +4264,22 @@ def study_plan_page(
         values = availability[day_name]
 
         if values["enabled"]:
-            start_text = time.fromisoformat(values["start"]).strftime(
-                "%I:%M %p"
-            ).lstrip("0")
-            end_text = time.fromisoformat(values["end"]).strftime(
-                "%I:%M %p"
-            ).lstrip("0")
-            window_text = f"{start_text}–{end_text}"
-            hours_text = f"{availability_window_hours(values):.1f} hr"
+            window_labels = [
+                (
+                    f"{format_study_time(window['start'])}"
+                    f"–{format_study_time(window['end'])}"
+                )
+                for window in values.get(
+                    "windows",
+                    [],
+                )
+            ]
+            window_text = "; ".join(
+                window_labels
+            )
+            hours_text = (
+                f"{availability_window_hours(values):.1f} hr"
+            )
         else:
             window_text = "Unavailable"
             hours_text = "0 hr"
@@ -3758,6 +4407,7 @@ def study_plan_page(
         st.warning("Some work did not fit into the available times.")
         for warning in warnings:
             st.write(f"• {warning}")
+
 
 
 def set_youtube_watcher_selection(
@@ -5206,11 +5856,16 @@ def focus_music_page() -> None:
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
-        "Search and watch educational videos, save useful links, "
+        "Search videos, play focus music, save useful links, "
         "and open trusted study tools."
     )
 
-    youtube_tab, saved_tab, tools_tab = st.tabs(
+    (
+        youtube_tab,
+        music_tab,
+        saved_tab,
+        tools_tab,
+    ) = st.tabs(
         [
             "▶ YouTube Watcher",
             "🔖 My Resources",
@@ -5807,6 +6462,9 @@ def additional_resources_page() -> None:
                 unsafe_allow_html=True,
             )
 
+    with music_tab:
+        focus_music_page()
+
     with saved_tab:
         st.markdown(
             '<div class="section-eyebrow">Personal library</div>',
@@ -6110,8 +6768,6 @@ elif page == "✅ My Tasks":
     my_tasks_page(tasks)
 elif page == "⏱️ Focus Timer":
     focus_timer_page(tasks)
-elif page == "🎵 Focus Music":
-    focus_music_page()
 elif page == "🗓️ Study Plan":
     study_plan_page(tasks, availability)
 else:
