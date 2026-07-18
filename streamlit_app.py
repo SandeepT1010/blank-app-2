@@ -3748,253 +3748,253 @@ def additional_resources_page() -> None:
             "youtube_watcher_selected"
         )
 
-selected_video_type = st.session_state.get(
-    "youtube_watcher_video_type",
-    "Everything",
-)
+        selected_video_type = st.session_state.get(
+            "youtube_watcher_video_type",
+            "Everything",
+        )
 
-if selected_video and selected_video_type != "Shorts":
-    safe_player_title = html.escape(
-        selected_video["title"]
-    )
-    safe_player_channel = html.escape(
-        selected_video["channel"]
-    )
-    duration_text = selected_video.get(
-        "duration_text",
-        "Duration unavailable",
-    )
-
-    st.markdown(
-        f"""
-        <div class="youtube-player-box">
-            <div class="youtube-player-title">
-                {safe_player_title}
-            </div>
-            <div class="youtube-player-meta">
-                {safe_player_channel} ·
-                {format_youtube_date(selected_video["published_at"])}
-                · {duration_text}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.video(selected_video["url"])
-
-if videos:
-    result_label = html.escape(
-        str(
-            st.session_state.get(
-                "youtube_watcher_label",
-                st.session_state.get(
-                    "youtube_watcher_query",
-                    "",
-                ),
+        if selected_video and selected_video_type != "Shorts":
+            safe_player_title = html.escape(
+                selected_video["title"]
             )
-        )
-    )
-    total_results = st.session_state.get(
-        "youtube_watcher_total",
-        0,
-    )
+            safe_player_channel = html.escape(
+                selected_video["channel"]
+            )
+            duration_text = selected_video.get(
+                "duration_text",
+                "Duration unavailable",
+            )
 
-    heading_name = (
-        "Shorts"
-        if selected_video_type == "Shorts"
-        else "Videos"
-    )
+            st.markdown(
+                f"""
+                <div class="youtube-player-box">
+                    <div class="youtube-player-title">
+                        {safe_player_title}
+                    </div>
+                    <div class="youtube-player-meta">
+                        {safe_player_channel} ·
+                        {format_youtube_date(selected_video["published_at"])}
+                        · {duration_text}
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.video(selected_video["url"])
 
-    st.markdown(
-        f"### {heading_name} for “{result_label}”"
-    )
-    st.caption(
-        f"Showing {len(videos)} result(s)"
-        + (
-            f" from approximately {total_results:,} matches."
-            if total_results
-            else "."
-        )
-    )
+        if videos:
+            result_label = html.escape(
+                str(
+                    st.session_state.get(
+                        "youtube_watcher_label",
+                        st.session_state.get(
+                            "youtube_watcher_query",
+                            "",
+                        ),
+                    )
+                )
+            )
+            total_results = st.session_state.get(
+                "youtube_watcher_total",
+                0,
+            )
 
-    if selected_video_type == "Shorts":
-        st.markdown(
-            """
-            <div class="shorts-note">
-                Scroll inside the Shorts box, use your mouse wheel or
-                trackpad, or click the ↑ and ↓ buttons to move between Shorts.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        render_shorts_scroll_feed(
-            videos,
-            st.session_state.app_theme,
-        )
-    else:
-        for row_start in range(0, len(videos), 3):
-            columns = st.columns(3)
-            row_videos = videos[
-                row_start:row_start + 3
-            ]
-
-            for offset, (column, video) in enumerate(
-                zip(columns, row_videos)
-            ):
-                result_index = row_start + offset
-
-                with column:
-                    with st.container(border=True):
-                        if video["thumbnail"]:
-                            st.image(
-                                video["thumbnail"],
-                                use_container_width=True,
-                            )
-
-                        safe_title = html.escape(
-                            shorten_text(
-                                video["title"],
-                                92,
-                            )
-                        )
-                        safe_channel = html.escape(
-                            video["channel"]
-                        )
-                        date_text = format_youtube_date(
-                            video["published_at"]
-                        )
-                        duration_text = video.get(
-                            "duration_text",
-                            "Duration unavailable",
-                        )
-                        type_text = video.get(
-                            "video_type",
-                            "Video",
-                        )
-
-                        st.markdown(
-                            f"""
-                            <div class="youtube-result-title">
-                                {safe_title}
-                            </div>
-                            <div class="youtube-result-meta">
-                                {safe_channel}<br>
-                                {date_text} · {duration_text}
-                            </div>
-                            <span class="video-type-badge">
-                                {type_text}
-                            </span>
-                            """,
-                            unsafe_allow_html=True,
-                        )
-
-                        watch_col, open_col = st.columns(2)
-
-                        with watch_col:
-                            if st.button(
-                                "▶ Watch",
-                                key=(
-                                    "watch_youtube_"
-                                    f"{video['video_id']}_"
-                                    f"{result_index}"
-                                ),
-                                use_container_width=True,
-                            ):
-                                st.session_state[
-                                    "youtube_watcher_selected"
-                                ] = video
-                                st.rerun()
-
-                        with open_col:
-                            st.link_button(
-                                "Open ↗",
-                                video["url"],
-                                use_container_width=True,
-                            )
-
-    next_page_token = st.session_state.get(
-        "youtube_watcher_next_token",
-        "",
-    )
-
-    if next_page_token:
-        spacer_left, more_col, spacer_right = st.columns(
-            [1.5, 1, 1.5]
-        )
-
-        with more_col:
-            button_label = (
-                "Show more Shorts"
+            heading_name = (
+                "Shorts"
                 if selected_video_type == "Shorts"
-                else "Show more videos"
+                else "Videos"
             )
 
-            if st.button(
-                button_label,
-                type="primary",
-                use_container_width=True,
-            ):
-                try:
-                    with st.spinner(
-                        "Loading more results..."
-                    ):
-                        (
-                            more_videos,
-                            new_next_token,
-                            total_results,
-                            resolved_label,
-                        ) = search_youtube_watcher(
-                            st.session_state[
-                                "youtube_watcher_query"
-                            ],
-                            youtube_api_key,
-                            st.session_state[
-                                "youtube_watcher_mode"
-                            ],
-                            st.session_state[
-                                "youtube_watcher_order"
-                            ],
-                            st.session_state.get(
-                                "youtube_watcher_video_type",
-                                "Everything",
-                            ),
-                            page_token=next_page_token,
-                            max_results=12,
-                        )
+            st.markdown(
+                f"### {heading_name} for “{result_label}”"
+            )
+            st.caption(
+                f"Showing {len(videos)} result(s)"
+                + (
+                    f" from approximately {total_results:,} matches."
+                    if total_results
+                    else "."
+                )
+            )
 
-                    existing_ids = {
-                        video["video_id"]
-                        for video in videos
-                    }
-                    unique_more = [
-                        video
-                        for video in more_videos
-                        if video["video_id"]
-                        not in existing_ids
+            if selected_video_type == "Shorts":
+                st.markdown(
+                    """
+                    <div class="shorts-note">
+                        Scroll inside the Shorts box, use your mouse wheel or
+                        trackpad, or click the ↑ and ↓ buttons to move between Shorts.
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                render_shorts_scroll_feed(
+                    videos,
+                    st.session_state.app_theme,
+                )
+            else:
+                for row_start in range(0, len(videos), 3):
+                    columns = st.columns(3)
+                    row_videos = videos[
+                        row_start:row_start + 3
                     ]
 
-                    st.session_state[
-                        "youtube_watcher_results"
-                    ] = videos + unique_more
-                    st.session_state[
-                        "youtube_watcher_next_token"
-                    ] = new_next_token
-                    st.session_state[
-                        "youtube_watcher_total"
-                    ] = total_results
-                    st.rerun()
-                except RuntimeError as error:
-                    st.error(str(error))
-else:
-    st.markdown(
-        """
-        <div class="youtube-empty">
-            <strong>Search for something to watch.</strong><br>
-            Find lessons, tutorials, creators, videos, or Shorts.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+                    for offset, (column, video) in enumerate(
+                        zip(columns, row_videos)
+                    ):
+                        result_index = row_start + offset
+
+                        with column:
+                            with st.container(border=True):
+                                if video["thumbnail"]:
+                                    st.image(
+                                        video["thumbnail"],
+                                        use_container_width=True,
+                                    )
+
+                                safe_title = html.escape(
+                                    shorten_text(
+                                        video["title"],
+                                        92,
+                                    )
+                                )
+                                safe_channel = html.escape(
+                                    video["channel"]
+                                )
+                                date_text = format_youtube_date(
+                                    video["published_at"]
+                                )
+                                duration_text = video.get(
+                                    "duration_text",
+                                    "Duration unavailable",
+                                )
+                                type_text = video.get(
+                                    "video_type",
+                                    "Video",
+                                )
+
+                                st.markdown(
+                                    f"""
+                                    <div class="youtube-result-title">
+                                        {safe_title}
+                                    </div>
+                                    <div class="youtube-result-meta">
+                                        {safe_channel}<br>
+                                        {date_text} · {duration_text}
+                                    </div>
+                                    <span class="video-type-badge">
+                                        {type_text}
+                                    </span>
+                                    """,
+                                    unsafe_allow_html=True,
+                                )
+
+                                watch_col, open_col = st.columns(2)
+
+                                with watch_col:
+                                    if st.button(
+                                        "▶ Watch",
+                                        key=(
+                                            "watch_youtube_"
+                                            f"{video['video_id']}_"
+                                            f"{result_index}"
+                                        ),
+                                        use_container_width=True,
+                                    ):
+                                        st.session_state[
+                                            "youtube_watcher_selected"
+                                        ] = video
+                                        st.rerun()
+
+                                with open_col:
+                                    st.link_button(
+                                        "Open ↗",
+                                        video["url"],
+                                        use_container_width=True,
+                                    )
+
+            next_page_token = st.session_state.get(
+                "youtube_watcher_next_token",
+                "",
+            )
+
+            if next_page_token:
+                spacer_left, more_col, spacer_right = st.columns(
+                    [1.5, 1, 1.5]
+                )
+
+                with more_col:
+                    button_label = (
+                        "Show more Shorts"
+                        if selected_video_type == "Shorts"
+                        else "Show more videos"
+                    )
+
+                    if st.button(
+                        button_label,
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        try:
+                            with st.spinner(
+                                "Loading more results..."
+                            ):
+                                (
+                                    more_videos,
+                                    new_next_token,
+                                    total_results,
+                                    resolved_label,
+                                ) = search_youtube_watcher(
+                                    st.session_state[
+                                        "youtube_watcher_query"
+                                    ],
+                                    youtube_api_key,
+                                    st.session_state[
+                                        "youtube_watcher_mode"
+                                    ],
+                                    st.session_state[
+                                        "youtube_watcher_order"
+                                    ],
+                                    st.session_state.get(
+                                        "youtube_watcher_video_type",
+                                        "Everything",
+                                    ),
+                                    page_token=next_page_token,
+                                    max_results=12,
+                                )
+
+                            existing_ids = {
+                                video["video_id"]
+                                for video in videos
+                            }
+                            unique_more = [
+                                video
+                                for video in more_videos
+                                if video["video_id"]
+                                not in existing_ids
+                            ]
+
+                            st.session_state[
+                                "youtube_watcher_results"
+                            ] = videos + unique_more
+                            st.session_state[
+                                "youtube_watcher_next_token"
+                            ] = new_next_token
+                            st.session_state[
+                                "youtube_watcher_total"
+                            ] = total_results
+                            st.rerun()
+                        except RuntimeError as error:
+                            st.error(str(error))
+        else:
+            st.markdown(
+                """
+                <div class="youtube-empty">
+                    <strong>Search for something to watch.</strong><br>
+                    Find lessons, tutorials, creators, videos, or Shorts.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     with saved_tab:
         st.markdown(
