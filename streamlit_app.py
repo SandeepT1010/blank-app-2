@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 import json
 import os
@@ -15,6 +16,11 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 
 # ---------------------------------------------------------
@@ -882,6 +888,125 @@ st.markdown(
             font-size: 0.72rem;
             font-weight: 760;
             margin-top: 0.35rem;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <style>
+        .ai-hero {
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 1.1rem;
+            background:
+                radial-gradient(
+                    circle at 85% 10%,
+                    rgba(45, 212, 191, 0.14),
+                    transparent 15rem
+                ),
+                linear-gradient(
+                    145deg,
+                    var(--card),
+                    var(--card-alt)
+                );
+            box-shadow: 0 14px 34px var(--shadow);
+            margin-bottom: 1rem;
+        }
+
+        .ai-hero-row {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+        }
+
+        .ai-mark {
+            width: 2.8rem;
+            height: 2.8rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 0.9rem;
+            color: var(--accent-text);
+            background: var(--accent);
+            font-size: 1.25rem;
+            box-shadow: 0 8px 22px var(--shadow);
+        }
+
+        .ai-title {
+            color: var(--text);
+            font-size: 1.4rem;
+            font-weight: 850;
+            letter-spacing: -0.03em;
+        }
+
+        .ai-subtitle {
+            color: var(--text-soft);
+            font-size: 0.9rem;
+            line-height: 1.45;
+            margin-top: 0.12rem;
+        }
+
+        .ai-capability-grid {
+            display: grid;
+            grid-template-columns:
+                repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.65rem;
+            margin: 0.75rem 0 1rem;
+        }
+
+        .ai-capability {
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 13px;
+            background: var(--card-alt);
+            color: var(--text-soft);
+            font-size: 0.84rem;
+            line-height: 1.4;
+        }
+
+        .ai-capability strong {
+            color: var(--text);
+        }
+
+        .ai-context-card {
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 0.8rem 0.9rem;
+            color: var(--text-soft);
+            background: var(--card-alt);
+            margin-bottom: 0.75rem;
+        }
+
+        .ai-image-chip {
+            display: inline-block;
+            padding: 0.25rem 0.55rem;
+            margin: 0.15rem 0.2rem 0.15rem 0;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--text-soft);
+            background: var(--card-hover);
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+
+        .ai-warning {
+            border-left: 4px solid var(--accent);
+            border-radius: 10px;
+            padding: 0.75rem 0.9rem;
+            color: var(--text-soft);
+            background: var(--alert);
+            margin-top: 0.8rem;
+        }
+
+        [data-testid="stChatMessage"] {
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            background: var(--card-alt);
+            padding: 0.35rem;
+            margin-bottom: 0.65rem;
         }
     </style>
     """,
@@ -3980,6 +4105,784 @@ def render_youtube_short_suggestions(
                         )
                         st.rerun()
 
+def get_openai_api_key() -> str:
+    environment_key = os.getenv(
+        "OPENAI_API_KEY",
+        "",
+    ).strip()
+
+    if environment_key:
+        return environment_key
+
+    try:
+        secret_key = str(
+            st.secrets.get(
+                "OPENAI_API_KEY",
+                "",
+            )
+        ).strip()
+    except Exception:
+        secret_key = ""
+
+    return secret_key
+
+
+def get_openai_model() -> str:
+    environment_model = os.getenv(
+        "OPENAI_MODEL",
+        "",
+    ).strip()
+
+    if environment_model:
+        return environment_model
+
+    try:
+        secret_model = str(
+            st.secrets.get(
+                "OPENAI_MODEL",
+                "",
+            )
+        ).strip()
+    except Exception:
+        secret_model = ""
+
+    return secret_model or "gpt-5.6-luna"
+
+
+def initialize_ai_state() -> None:
+    defaults = {
+        "ai_messages": [],
+        "ai_question_input": "",
+        "ai_last_images": [],
+        "ai_uploader_version": 0,
+        "ai_include_studyflow_context": True,
+    }
+
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
+
+
+def uploaded_image_to_data_url(
+    uploaded_file,
+) -> tuple[str, str]:
+    image_bytes = uploaded_file.getvalue()
+
+    if not image_bytes:
+        raise ValueError(
+            f"{uploaded_file.name} is empty."
+        )
+
+    maximum_bytes = 15 * 1024 * 1024
+
+    if len(image_bytes) > maximum_bytes:
+        raise ValueError(
+            f"{uploaded_file.name} is larger than 15 MB."
+        )
+
+    mime_type = (
+        uploaded_file.type
+        or "image/jpeg"
+    ).lower()
+
+    allowed_types = {
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+    }
+
+    if mime_type not in allowed_types:
+        raise ValueError(
+            f"{uploaded_file.name} is not a supported image."
+        )
+
+    encoded_image = base64.b64encode(
+        image_bytes
+    ).decode("utf-8")
+
+    return (
+        uploaded_file.name,
+        f"data:{mime_type};base64,{encoded_image}",
+    )
+
+
+def build_ai_studyflow_context(
+    tasks: list[dict],
+    availability: dict[str, dict],
+) -> str:
+    active_tasks = [
+        task
+        for task in tasks
+        if not task["completed"]
+    ]
+
+    active_tasks.sort(
+        key=lambda task: (
+            -smart_score(task),
+            task["due_date"],
+        )
+    )
+
+    task_context = []
+
+    for task in active_tasks[:30]:
+        task_context.append(
+            {
+                "id": task["id"],
+                "subject": task["subject"],
+                "task": task["task_name"],
+                "due_date": task["due_date"],
+                "days_remaining": days_remaining(task),
+                "priority": task["priority"],
+                "hours_needed": float(
+                    task["hours_needed"]
+                ),
+                "studied_hours": float(
+                    task["studied_hours"]
+                ),
+                "remaining_hours": round(
+                    remaining_task_hours(task),
+                    2,
+                ),
+                "status": urgency(task)[0],
+                "planner_score": smart_score(task),
+            }
+        )
+
+    availability_context = {
+        day: {
+            "enabled": settings["enabled"],
+            "start": settings["start"],
+            "end": settings["end"],
+            "hours": round(
+                availability_window_hours(settings),
+                2,
+            ),
+        }
+        for day, settings in availability.items()
+    }
+
+    schedule, warnings = generate_weekly_plan(
+        tasks,
+        availability,
+    )
+
+    serializable_schedule = []
+
+    for item in schedule[:30]:
+        serializable_schedule.append(
+            {
+                key: (
+                    value.isoformat()
+                    if isinstance(value, date)
+                    else value
+                )
+                for key, value in item.items()
+            }
+        )
+
+    today_minutes, today_sessions = (
+        get_today_focus_stats()
+    )
+
+    context = {
+        "today": date.today().isoformat(),
+        "current_time": datetime.now().isoformat(
+            timespec="minutes"
+        ),
+        "focus_today": {
+            "minutes": today_minutes,
+            "sessions": today_sessions,
+        },
+        "active_tasks": task_context,
+        "weekly_availability": availability_context,
+        "generated_study_plan": serializable_schedule,
+        "planner_warnings": warnings[:15],
+    }
+
+    return json.dumps(
+        context,
+        indent=2,
+        ensure_ascii=False,
+    )
+
+
+def build_recent_ai_transcript(
+    messages: list[dict],
+    limit: int = 10,
+) -> str:
+    recent_messages = messages[-limit:]
+
+    if not recent_messages:
+        return "No earlier messages."
+
+    lines = []
+
+    for message in recent_messages:
+        role = (
+            "Student"
+            if message["role"] == "user"
+            else "StudyFlow AI"
+        )
+        lines.append(
+            f"{role}: {message['content']}"
+        )
+
+    return "\n\n".join(lines)
+
+
+def ask_studyflow_ai(
+    question: str,
+    tasks: list[dict],
+    availability: dict[str, dict],
+    image_data_urls: list[str],
+    include_studyflow_context: bool,
+    previous_messages: list[dict],
+) -> str:
+    api_key = get_openai_api_key()
+
+    if not api_key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is not configured."
+        )
+
+    if OpenAI is None:
+        raise RuntimeError(
+            "The OpenAI Python package is not installed. "
+            "Add openai to requirements.txt and redeploy."
+        )
+
+    client = OpenAI(api_key=api_key)
+    model = get_openai_model()
+
+    instructions = """
+You are StudyFlow AI, a supportive and accurate study assistant.
+
+You can:
+- answer broad academic and general educational questions;
+- analyze uploaded worksheets, screenshots, graphs, diagrams,
+  handwritten work, and notes;
+- explain solutions step by step;
+- create quizzes, flashcards, examples, and study guides;
+- summarize pasted notes;
+- break assignments into manageable steps;
+- recommend what the student should study next;
+- create plain-English study plans;
+- recommend study strategies and useful YouTube search phrases;
+- suggest how missed work should be rescheduled.
+
+Rules:
+1. Teach clearly. Show the important reasoning and intermediate steps
+   instead of only giving a final answer.
+2. When an image is blurry, cropped, ambiguous, or missing information,
+   say exactly what cannot be read instead of inventing details.
+3. Use StudyFlow task and schedule data as the source of truth when it
+   is supplied. Do not claim that you edited or rescheduled anything;
+   provide a proposed change for the student to approve.
+4. For questions requiring current live information, explain that this
+   assistant may not have live web access.
+5. For medical, legal, financial, or safety-critical topics, be cautious
+   and recommend checking an appropriate qualified source.
+6. Keep answers organized and student-friendly. Match the requested
+   level of detail.
+""".strip()
+
+    transcript = build_recent_ai_transcript(
+        previous_messages
+    )
+
+    prompt_parts = [
+        "RECENT CONVERSATION:",
+        transcript,
+        "",
+        "CURRENT STUDENT REQUEST:",
+        question.strip(),
+    ]
+
+    if include_studyflow_context:
+        prompt_parts.extend(
+            [
+                "",
+                "CURRENT STUDYFLOW DATA:",
+                build_ai_studyflow_context(
+                    tasks,
+                    availability,
+                ),
+            ]
+        )
+    else:
+        prompt_parts.extend(
+            [
+                "",
+                "No StudyFlow task or schedule data "
+                "was included for this request.",
+            ]
+        )
+
+    content = [
+        {
+            "type": "input_text",
+            "text": "\n".join(prompt_parts),
+        }
+    ]
+
+    for image_data_url in image_data_urls:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": image_data_url,
+            }
+        )
+
+    try:
+        response = client.responses.create(
+            model=model,
+            instructions=instructions,
+            input=[
+                {
+                    "role": "user",
+                    "content": content,
+                }
+            ],
+            max_output_tokens=2200,
+        )
+    except Exception as error:
+        message = str(error)
+
+        if api_key and api_key in message:
+            message = message.replace(
+                api_key,
+                "[API key hidden]",
+            )
+
+        raise RuntimeError(
+            f"OpenAI request failed: {message}"
+        ) from error
+
+    answer = (response.output_text or "").strip()
+
+    if not answer:
+        raise RuntimeError(
+            "The AI returned an empty response."
+        )
+
+    return answer
+
+
+def set_ai_quick_prompt(prompt: str) -> None:
+    st.session_state.ai_question_input = prompt
+
+
+def ai_study_assistant_page(
+    tasks: list[dict],
+    availability: dict[str, dict],
+) -> None:
+    initialize_ai_state()
+
+    st.subheader("AI Study Assistant")
+    st.caption(
+        "Ask academic questions, use your StudyFlow data, "
+        "or upload images for analysis."
+    )
+
+    st.markdown(
+        """
+        <div class="ai-hero">
+            <div class="ai-hero-row">
+                <div class="ai-mark">✦</div>
+                <div>
+                    <div class="ai-title">
+                        StudyFlow AI
+                    </div>
+                    <div class="ai-subtitle">
+                        A task-aware study assistant that can answer
+                        questions, explain images, build study plans,
+                        create quizzes, summarize notes, and help
+                        organize missed work.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="ai-capability-grid">
+            <div class="ai-capability">
+                <strong>Ask anything</strong><br>
+                Get explanations for school subjects, coding,
+                writing, and general learning questions.
+            </div>
+            <div class="ai-capability">
+                <strong>Understand images</strong><br>
+                Upload worksheets, graphs, diagrams,
+                screenshots, or handwritten work.
+            </div>
+            <div class="ai-capability">
+                <strong>Use your planner</strong><br>
+                Ask what to study next or request a plan based
+                on deadlines, priorities, and available time.
+            </div>
+            <div class="ai-capability">
+                <strong>Create practice</strong><br>
+                Generate quizzes, flashcards, examples,
+                summaries, and step-by-step study guides.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    api_key = get_openai_api_key()
+
+    if api_key:
+        st.success(
+            f"AI is connected using {get_openai_model()}."
+        )
+    else:
+        st.error(
+            "AI is not connected. Add OPENAI_API_KEY to "
+            "Streamlit or Codespaces secrets, then restart "
+            "the app."
+        )
+
+    control_left, control_right = st.columns(
+        [2.2, 1]
+    )
+
+    with control_left:
+        include_context = st.toggle(
+            "Use my tasks, deadlines, availability, "
+            "focus history, and generated study plan",
+            value=st.session_state[
+                "ai_include_studyflow_context"
+            ],
+            key="ai_include_context_toggle",
+        )
+        st.session_state[
+            "ai_include_studyflow_context"
+        ] = include_context
+
+    with control_right:
+        if st.button(
+            "Clear conversation",
+            use_container_width=True,
+        ):
+            st.session_state.ai_messages = []
+            st.session_state.ai_last_images = []
+            st.session_state.ai_question_input = ""
+            st.session_state.ai_uploader_version += 1
+            st.rerun()
+
+    if include_context:
+        active_count = len(
+            [
+                task
+                for task in tasks
+                if not task["completed"]
+            ]
+        )
+        st.markdown(
+            f"""
+            <div class="ai-context-card">
+                StudyFlow context is on. The assistant can use
+                <strong>{active_count} active task(s)</strong>,
+                your weekly availability, focus history,
+                and your generated timetable.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### Quick actions")
+
+    quick_prompts = [
+        (
+            "What should I study?",
+            "Based on my StudyFlow tasks, deadlines, "
+            "priorities, availability, and progress, what "
+            "should I study next? Explain the order.",
+        ),
+        (
+            "Plan my day",
+            "Create a realistic study plan for today using "
+            "my StudyFlow tasks and available time. Include "
+            "breaks and explain the priorities.",
+        ),
+        (
+            "Break down a task",
+            "Help me break my most urgent large assignment "
+            "into small, clear steps I can complete.",
+        ),
+        (
+            "Reschedule missed work",
+            "Review my overdue or unfinished tasks and propose "
+            "a realistic rescheduling plan. Do not claim to "
+            "change the app; show me the proposed changes.",
+        ),
+        (
+            "Quiz me",
+            "Create a short quiz on the topic I provide. Ask "
+            "one question at a time and wait for my answer.",
+        ),
+        (
+            "Make flashcards",
+            "Turn the notes or topic I provide into useful "
+            "question-and-answer flashcards.",
+        ),
+        (
+            "Summarize notes",
+            "Summarize the notes I paste or upload. Identify "
+            "the main ideas, important terms, and likely test "
+            "questions.",
+        ),
+        (
+            "YouTube search ideas",
+            "Suggest precise educational YouTube search phrases "
+            "based on what I need to study.",
+        ),
+    ]
+
+    for row_start in range(0, len(quick_prompts), 4):
+        columns = st.columns(4)
+
+        for column, (label, prompt) in zip(
+            columns,
+            quick_prompts[row_start:row_start + 4],
+        ):
+            with column:
+                if st.button(
+                    label,
+                    key=(
+                        "ai_quick_"
+                        + label.lower()
+                        .replace(" ", "_")
+                        .replace("?", "")
+                    ),
+                    use_container_width=True,
+                ):
+                    set_ai_quick_prompt(prompt)
+
+    if st.session_state.ai_messages:
+        st.markdown("### Conversation")
+
+        for message in st.session_state.ai_messages:
+            avatar = (
+                "🧑‍🎓"
+                if message["role"] == "user"
+                else "✦"
+            )
+
+            with st.chat_message(
+                message["role"],
+                avatar=avatar,
+            ):
+                st.markdown(message["content"])
+
+                image_names = message.get(
+                    "image_names",
+                    [],
+                )
+
+                if image_names:
+                    chips = "".join(
+                        (
+                            '<span class="ai-image-chip">'
+                            f"📷 {html.escape(name)}"
+                            "</span>"
+                        )
+                        for name in image_names
+                    )
+                    st.markdown(
+                        chips,
+                        unsafe_allow_html=True,
+                    )
+
+    st.markdown("### Ask StudyFlow AI")
+
+    question = st.text_area(
+        "Question or instructions",
+        key="ai_question_input",
+        placeholder=(
+            "Ask a question, paste notes, request a study plan, "
+            "or describe what you want explained in the image..."
+        ),
+        height=135,
+    )
+
+    uploaded_images = st.file_uploader(
+        "Upload images",
+        type=["png", "jpg", "jpeg", "webp", "gif"],
+        accept_multiple_files=True,
+        key=(
+            "ai_image_uploader_"
+            f"{st.session_state.ai_uploader_version}"
+        ),
+        help=(
+            "Upload up to four worksheets, screenshots, "
+            "graphs, diagrams, or photos."
+        ),
+    )
+
+    uploaded_images = list(uploaded_images or [])[:4]
+
+    if uploaded_images:
+        preview_columns = st.columns(
+            min(4, len(uploaded_images))
+        )
+
+        for column, uploaded_image in zip(
+            preview_columns,
+            uploaded_images,
+        ):
+            with column:
+                st.image(
+                    uploaded_image,
+                    caption=uploaded_image.name,
+                    use_container_width=True,
+                )
+
+    last_images = st.session_state.ai_last_images
+
+    if last_images and not uploaded_images:
+        image_names = [
+            image["name"]
+            for image in last_images
+        ]
+        st.info(
+            "The latest uploaded image(s) will also be "
+            "included with this follow-up: "
+            + ", ".join(image_names)
+        )
+
+        if st.button(
+            "Remove attached images",
+            use_container_width=False,
+        ):
+            st.session_state.ai_last_images = []
+            st.rerun()
+
+    ask_col, note_col = st.columns([1, 2.2])
+
+    with ask_col:
+        ask_clicked = st.button(
+            "✦ Ask AI",
+            type="primary",
+            use_container_width=True,
+        )
+
+    with note_col:
+        st.caption(
+            "AI can make mistakes. Check important answers "
+            "and make sure uploaded images are clear and complete."
+        )
+
+    if ask_clicked:
+        effective_question = question.strip()
+
+        if not effective_question and uploaded_images:
+            effective_question = (
+                "Explain what is shown in the uploaded image(s). "
+                "Read the question carefully and show the steps."
+            )
+
+        if not effective_question:
+            st.warning(
+                "Enter a question or upload an image."
+            )
+            return
+
+        if not api_key:
+            st.error(
+                "OPENAI_API_KEY is not configured."
+            )
+            return
+
+        new_images = []
+
+        try:
+            for uploaded_image in uploaded_images:
+                image_name, data_url = (
+                    uploaded_image_to_data_url(
+                        uploaded_image
+                    )
+                )
+                new_images.append(
+                    {
+                        "name": image_name,
+                        "data_url": data_url,
+                    }
+                )
+        except ValueError as error:
+            st.error(str(error))
+            return
+
+        if new_images:
+            st.session_state.ai_last_images = (
+                new_images
+            )
+
+        images_for_request = (
+            st.session_state.ai_last_images
+        )
+        image_names = [
+            image["name"]
+            for image in images_for_request
+        ]
+        image_data_urls = [
+            image["data_url"]
+            for image in images_for_request
+        ]
+
+        previous_messages = list(
+            st.session_state.ai_messages
+        )
+
+        with st.spinner(
+            "StudyFlow AI is thinking..."
+        ):
+            try:
+                answer = ask_studyflow_ai(
+                    effective_question,
+                    tasks,
+                    availability,
+                    image_data_urls,
+                    include_context,
+                    previous_messages,
+                )
+            except RuntimeError as error:
+                st.error(str(error))
+                return
+
+        st.session_state.ai_messages.append(
+            {
+                "role": "user",
+                "content": effective_question,
+                "image_names": image_names,
+            }
+        )
+        st.session_state.ai_messages.append(
+            {
+                "role": "assistant",
+                "content": answer,
+            }
+        )
+        st.session_state.ai_question_input = ""
+        st.session_state.ai_uploader_version += 1
+        st.rerun()
+
+    st.markdown(
+        """
+        <div class="ai-warning">
+            StudyFlow AI can analyze text and images, but it
+            may misread blurry handwriting, tiny labels, or
+            cropped questions. Important academic, health,
+            legal, financial, and safety decisions should be
+            verified independently.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
@@ -4855,6 +5758,7 @@ with st.sidebar:
             "✅ My Tasks",
             "⏱️ Focus Timer",
             "🗓️ Study Plan",
+            "✦ AI Study Assistant",
             "📚 Additional Resources",
         ],
         label_visibility="collapsed",
@@ -4890,5 +5794,7 @@ elif page == "⏱️ Focus Timer":
     focus_timer_page(tasks)
 elif page == "🗓️ Study Plan":
     study_plan_page(tasks, availability)
+elif page == "✦ AI Study Assistant":
+    ai_study_assistant_page(tasks, availability)
 else:
     additional_resources_page()
