@@ -1,3 +1,15 @@
-streamlit>=1.40
-pandas>=2.0
-openai>=2.0
+[tool.poetry]
+name = "studyflow"
+version = "0.1.0"
+description = "AI-powered study planner"
+authors = ["StudyFlow"]
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.14"
+streamlit = ">=1.40"
+pandas = ">=2.0"
+openai = ">=2.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
