@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import base64
 import html
+import hashlib
 import json
+import io
 import os
 import re
+import random
 import sqlite3
+import struct
 import time as time_module
 import urllib.error
+import wave
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, time, timedelta
@@ -4718,10 +4724,14 @@ def initialize_music_state() -> None:
         "music_search_total": 0,
         "music_search_error": "",
         "music_selected_index": 0,
+        "music_persistence_enabled": False,
         "persistent_music_url": "",
         "persistent_music_title": "",
         "persistent_music_active": False,
+        "persistent_music_loop": False,
         "persistent_music_nonce": 0,
+        "persistent_music_source_id": "",
+        "uploaded_music_signature": "",
     }
 
     for key, value in defaults.items():
@@ -4735,21 +4745,99 @@ def initialize_music_state() -> None:
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+def music_source_id(
+    url: str,
+    title: str,
+) -> str:
+    return hashlib.sha256(
+        f"{url}|{title}".encode(
+            "utf-8",
+            errors="ignore",
+        )
+    ).hexdigest()
+
+
 def remember_persistent_music(
     url: str,
     title: str,
+    loop: bool = False,
 ) -> None:
     st.session_state.persistent_music_url = url
     st.session_state.persistent_music_title = title
+    st.session_state.persistent_music_loop = loop
+    st.session_state.persistent_music_source_id = (
+        music_source_id(
+            url,
+            title,
+        )
+    )
 
 
 def activate_persistent_music(
     url: str,
     title: str,
+    loop: bool = False,
+    force_reload: bool = False,
 ) -> None:
-    remember_persistent_music(url, title)
+    new_source_id = music_source_id(
+        url,
+        title,
+    )
+    old_source_id = st.session_state.get(
+        "persistent_music_source_id",
+        "",
+    )
+    was_active = bool(
+        st.session_state.get(
+            "persistent_music_active",
+            False,
+        )
+    )
+
+    remember_persistent_music(
+        url,
+        title,
+        loop=loop,
+    )
     st.session_state.persistent_music_active = True
-    st.session_state.persistent_music_nonce += 1
+
+    if (
+        force_reload
+        or not was_active
+        or new_source_id != old_source_id
+    ):
+        st.session_state.persistent_music_nonce += 1
+
+
+def auto_activate_persistent_music(
+    url: str,
+    title: str,
+    loop: bool = False,
+) -> None:
+    remember_persistent_music(
+        url,
+        title,
+        loop=loop,
+    )
+
+    if st.session_state.music_persistence_enabled:
+        activate_persistent_music(
+            url,
+            title,
+            loop=loop,
+        )
 
 
 def stop_persistent_music() -> None:
@@ -4757,13 +4845,157 @@ def stop_persistent_music() -> None:
     st.session_state.persistent_music_nonce += 1
 
 
+def uploaded_audio_to_data_url(
+    uploaded_audio,
+) -> tuple[str, str, str]:
+    audio_bytes = uploaded_audio.getvalue()
+
+    if not audio_bytes:
+        raise ValueError(
+            f"{uploaded_audio.name} is empty."
+        )
+
+    maximum_bytes = 25 * 1024 * 1024
+
+    if len(audio_bytes) > maximum_bytes:
+        raise ValueError(
+            "Persistent uploaded audio must be "
+            "25 MB or smaller."
+        )
+
+    mime_type = (
+        uploaded_audio.type
+        or "audio/mpeg"
+    ).lower()
+
+    allowed_types = {
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/ogg",
+        "audio/mp4",
+        "audio/x-m4a",
+        "audio/aac",
+        "audio/flac",
+        "audio/x-flac",
+    }
+
+    if mime_type not in allowed_types:
+        raise ValueError(
+            f"{uploaded_audio.name} is not a "
+            "supported audio format."
+        )
+
+    encoded = base64.b64encode(
+        audio_bytes
+    ).decode("ascii")
+
+    return (
+        uploaded_audio.name,
+        f"data:{mime_type};base64,{encoded}",
+        hashlib.sha256(
+            audio_bytes
+        ).hexdigest(),
+    )
+
+
+@st.cache_data
+def generate_focus_noise_data_url(
+    noise_type: str,
+) -> str:
+    if noise_type not in {
+        "white",
+        "brown",
+    }:
+        raise ValueError(
+            "Unsupported focus sound."
+        )
+
+    sample_rate = 22050
+    duration_seconds = 8
+    sample_count = (
+        sample_rate * duration_seconds
+    )
+    random_source = random.Random(
+        2048
+        if noise_type == "white"
+        else 4096
+    )
+
+    frames = bytearray()
+    last_output = 0.0
+
+    for _ in range(sample_count):
+        white_value = (
+            random_source.random() * 2 - 1
+        )
+
+        if noise_type == "white":
+            value = white_value * 0.22
+        else:
+            last_output = (
+                last_output
+                + 0.02 * white_value
+            ) / 1.02
+            value = last_output * 0.75
+
+        value = max(
+            -1.0,
+            min(1.0, value),
+        )
+        frames.extend(
+            struct.pack(
+                "<h",
+                int(value * 32767),
+            )
+        )
+
+    audio_buffer = io.BytesIO()
+
+    with wave.open(
+        audio_buffer,
+        "wb",
+    ) as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(
+            sample_rate
+        )
+        wav_file.writeframes(
+            bytes(frames)
+        )
+
+    encoded = base64.b64encode(
+        audio_buffer.getvalue()
+    ).decode("ascii")
+
+    return (
+        "data:audio/wav;base64,"
+        + encoded
+    )
+
+
 def persistent_music_embed_details(
     url: str,
 ) -> dict | None:
-    spotify_details = spotify_embed_details(url)
+    if url.startswith("data:audio/"):
+        return {
+            "kind": "audio",
+            "src": url,
+            "height": 76,
+            "label": "Audio player",
+        }
+
+    spotify_details = spotify_embed_details(
+        url
+    )
 
     if spotify_details:
-        embed_url, player_height = spotify_details
+        embed_url, player_height = (
+            spotify_details
+        )
+
         return {
             "kind": "iframe",
             "src": embed_url,
@@ -4771,10 +5003,14 @@ def persistent_music_embed_details(
             "label": "Spotify player",
         }
 
-    youtube_details = youtube_embed_details(url)
+    youtube_details = youtube_embed_details(
+        url
+    )
 
     if youtube_details:
-        content_type, embed_value = youtube_details
+        content_type, embed_value = (
+            youtube_details
+        )
 
         if content_type == "playlist":
             separator = (
@@ -4782,6 +5018,7 @@ def persistent_music_embed_details(
                 if "?" in embed_value
                 else "?"
             )
+
             return {
                 "kind": "iframe",
                 "src": (
@@ -4793,7 +5030,9 @@ def persistent_music_embed_details(
                 "label": "YouTube playlist",
             }
 
-        parsed = urllib.parse.urlparse(embed_value)
+        parsed = urllib.parse.urlparse(
+            embed_value
+        )
         video_id = urllib.parse.parse_qs(
             parsed.query
         ).get("v", [""])[0]
@@ -4824,12 +5063,6 @@ def persistent_music_embed_details(
 
 
 def render_persistent_music_overlay() -> None:
-    """
-    Inject a fixed player into the browser's parent page.
-
-    The player is placed outside Streamlit's normal page-content tree,
-    so changing the selected StudyFlow page does not remove it.
-    """
     initialize_music_state()
 
     active = bool(
@@ -4840,63 +5073,80 @@ def render_persistent_music_overlay() -> None:
         st.session_state.persistent_music_title
         or "StudyFlow Music"
     )
+    loop_audio = bool(
+        st.session_state.persistent_music_loop
+    )
     nonce = int(
         st.session_state.persistent_music_nonce
     )
 
     details = (
-        persistent_music_embed_details(url)
+        persistent_music_embed_details(
+            url
+        )
         if active and url
         else None
     )
 
-    overlay_id = "studyflow-persistent-music-overlay"
+    overlay_id = (
+        "studyflow-persistent-music-overlay"
+    )
 
     if details is None:
-        removal_script = f"""
-        <script>
-            try {{
-                const parentDocument =
-                    window.parent.document;
-                const existing =
-                    parentDocument.getElementById(
-                        {json.dumps(overlay_id)}
-                    );
-
-                if (existing) {{
-                    existing.remove();
-                }}
-            }} catch (error) {{
-                console.warn(
-                    "StudyFlow could not remove the music overlay.",
-                    error
-                );
-            }}
-        </script>
-        """
         components.html(
-            removal_script,
+            f"""
+            <script>
+                try {{
+                    const existing =
+                        window.parent.document
+                        .getElementById(
+                            {json.dumps(overlay_id)}
+                        );
+
+                    if (existing) {{
+                        existing.remove();
+                    }}
+                }} catch (error) {{
+                    console.warn(error);
+                }}
+            </script>
+            """,
             height=0,
             scrolling=False,
         )
         return
 
-    token = f"{url}|{nonce}"
+    source_id = (
+        st.session_state[
+            "persistent_music_source_id"
+        ]
+        or music_source_id(
+            url,
+            title,
+        )
+    )
+    token = f"{source_id}|{nonce}"
+    safe_title = html.escape(title)
     safe_src = html.escape(
         details["src"],
         quote=True,
     )
-    safe_title = html.escape(title)
     safe_label = html.escape(
         details["label"],
         quote=True,
     )
 
     if details["kind"] == "audio":
+        loop_attribute = (
+            "loop"
+            if loop_audio
+            else ""
+        )
         player_markup = f"""
             <audio
                 controls
                 autoplay
+                {loop_attribute}
                 style="width:100%;"
                 src="{safe_src}">
             </audio>
@@ -4923,340 +5173,349 @@ def render_persistent_music_overlay() -> None:
             </iframe>
         """
 
-    overlay_script = f"""
-    <script>
-        (() => {{
-            try {{
-                const doc = window.parent.document;
-                const overlayId =
-                    {json.dumps(overlay_id)};
-                const token =
-                    {json.dumps(token)};
-                let overlay =
-                    doc.getElementById(overlayId);
+    components.html(
+        f"""
+        <script>
+            (() => {{
+                try {{
+                    const doc =
+                        window.parent.document;
+                    const overlayId =
+                        {json.dumps(overlay_id)};
+                    const token =
+                        {json.dumps(token)};
+                    let overlay =
+                        doc.getElementById(
+                            overlayId
+                        );
 
-                if (
-                    overlay
-                    && overlay.dataset.token !== token
-                ) {{
-                    overlay.remove();
-                    overlay = null;
-                }}
+                    if (
+                        overlay
+                        && overlay.dataset.token
+                        !== token
+                    ) {{
+                        overlay.remove();
+                        overlay = null;
+                    }}
 
-                if (overlay) {{
-                    return;
-                }}
+                    if (overlay) {{
+                        return;
+                    }}
 
-                overlay = doc.createElement("div");
-                overlay.id = overlayId;
-                overlay.dataset.token = token;
-                overlay.innerHTML = `
-                    <div class="studyflow-music-header">
-                        <div class="studyflow-music-heading">
-                            <span class="studyflow-music-icon">
-                                ♫
-                            </span>
-                            <span class="studyflow-music-title">
-                                {safe_title}
-                            </span>
+                    overlay =
+                        doc.createElement("div");
+                    overlay.id = overlayId;
+                    overlay.dataset.token = token;
+                    overlay.innerHTML = `
+                        <div class="sf-music-header">
+                            <div class="sf-music-name">
+                                <span>♫</span>
+                                <strong>
+                                    {safe_title}
+                                </strong>
+                            </div>
+
+                            <div class="sf-music-actions">
+                                <button
+                                    class="sf-minimize"
+                                    type="button">
+                                    −
+                                </button>
+                                <button
+                                    class="sf-close"
+                                    type="button">
+                                    ×
+                                </button>
+                            </div>
                         </div>
 
-                        <div class="studyflow-music-actions">
-                            <button
-                                type="button"
-                                class="studyflow-music-minimize"
-                                aria-label="Minimize player">
-                                −
-                            </button>
-                            <button
-                                type="button"
-                                class="studyflow-music-close"
-                                aria-label="Close player">
-                                ×
-                            </button>
+                        <div class="sf-music-body">
+                            {player_markup}
                         </div>
-                    </div>
-
-                    <div class="studyflow-music-body">
-                        {player_markup}
-                    </div>
-                `;
-
-                const styleId =
-                    "studyflow-persistent-music-style";
-
-                if (!doc.getElementById(styleId)) {{
-                    const style =
-                        doc.createElement("style");
-                    style.id = styleId;
-                    style.textContent = `
-                        #${{overlayId}} {{
-                            position: fixed;
-                            right: 22px;
-                            bottom: 22px;
-                            width: min(390px, calc(100vw - 32px));
-                            z-index: 2147483000;
-                            border: 1px solid
-                                rgba(45, 212, 191, 0.55);
-                            border-radius: 18px;
-                            overflow: hidden;
-                            color: #f4fbfa;
-                            background: #0d2226;
-                            box-shadow:
-                                0 20px 60px
-                                rgba(0, 0, 0, 0.48);
-                            font-family:
-                                Arial,
-                                Helvetica,
-                                sans-serif;
-                        }}
-
-                        #${{overlayId}}
-                        .studyflow-music-header {{
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            gap: 12px;
-                            min-height: 52px;
-                            padding: 9px 11px;
-                            cursor: move;
-                            user-select: none;
-                            background:
-                                linear-gradient(
-                                    135deg,
-                                    #0f766e,
-                                    #115e59
-                                );
-                        }}
-
-                        #${{overlayId}}
-                        .studyflow-music-heading {{
-                            display: flex;
-                            align-items: center;
-                            gap: 9px;
-                            min-width: 0;
-                        }}
-
-                        #${{overlayId}}
-                        .studyflow-music-icon {{
-                            display: inline-flex;
-                            align-items: center;
-                            justify-content: center;
-                            width: 31px;
-                            height: 31px;
-                            flex: 0 0 auto;
-                            border-radius: 10px;
-                            color: #032421;
-                            background: #5eead4;
-                            font-weight: 900;
-                        }}
-
-                        #${{overlayId}}
-                        .studyflow-music-title {{
-                            overflow: hidden;
-                            color: #ffffff;
-                            font-size: 14px;
-                            font-weight: 800;
-                            text-overflow: ellipsis;
-                            white-space: nowrap;
-                        }}
-
-                        #${{overlayId}}
-                        .studyflow-music-actions {{
-                            display: flex;
-                            gap: 6px;
-                            flex: 0 0 auto;
-                        }}
-
-                        #${{overlayId}} button {{
-                            width: 32px;
-                            height: 32px;
-                            padding: 0;
-                            border: 1px solid
-                                rgba(255,255,255,0.35);
-                            border-radius: 999px;
-                            color: #ffffff;
-                            background:
-                                rgba(0,0,0,0.18);
-                            font-size: 19px;
-                            font-weight: 800;
-                            cursor: pointer;
-                        }}
-
-                        #${{overlayId}} button:hover {{
-                            background:
-                                rgba(255,255,255,0.16);
-                        }}
-
-                        #${{overlayId}}
-                        .studyflow-music-body {{
-                            padding: 11px;
-                            background: #0d2226;
-                        }}
-
-                        #${{overlayId}}.minimized {{
-                            width: min(
-                                310px,
-                                calc(100vw - 32px)
-                            );
-                        }}
-
-                        #${{overlayId}}.minimized
-                        .studyflow-music-body {{
-                            display: none;
-                        }}
-
-                        @media (max-width: 650px) {{
-                            #${{overlayId}} {{
-                                right: 12px;
-                                bottom: 12px;
-                                width:
-                                    calc(100vw - 24px);
-                            }}
-                        }}
                     `;
 
-                    doc.head.appendChild(style);
-                }}
+                    const styleId =
+                        "studyflow-persistent-"
+                        + "music-style";
 
-                doc.body.appendChild(overlay);
+                    if (
+                        !doc.getElementById(
+                            styleId
+                        )
+                    ) {{
+                        const style =
+                            doc.createElement(
+                                "style"
+                            );
+                        style.id = styleId;
+                        style.textContent = `
+                            #${{overlayId}} {{
+                                position: fixed;
+                                right: 22px;
+                                bottom: 22px;
+                                width: min(
+                                    390px,
+                                    calc(100vw - 32px)
+                                );
+                                z-index: 2147483000;
+                                overflow: hidden;
+                                border: 1px solid
+                                    rgba(
+                                        45,
+                                        212,
+                                        191,
+                                        0.55
+                                    );
+                                border-radius: 18px;
+                                color: #f4fbfa;
+                                background: #0d2226;
+                                box-shadow:
+                                    0 20px 60px
+                                    rgba(0,0,0,0.48);
+                                font-family:
+                                    Arial,
+                                    Helvetica,
+                                    sans-serif;
+                            }}
 
-                const minimizeButton =
-                    overlay.querySelector(
-                        ".studyflow-music-minimize"
-                    );
-                const closeButton =
-                    overlay.querySelector(
-                        ".studyflow-music-close"
-                    );
-                const header =
-                    overlay.querySelector(
-                        ".studyflow-music-header"
-                    );
+                            #${{overlayId}}
+                            .sf-music-header {{
+                                display: flex;
+                                align-items: center;
+                                justify-content:
+                                    space-between;
+                                gap: 10px;
+                                min-height: 50px;
+                                padding: 9px 11px;
+                                cursor: move;
+                                user-select: none;
+                                background:
+                                    linear-gradient(
+                                        135deg,
+                                        #0f766e,
+                                        #115e59
+                                    );
+                            }}
 
-                minimizeButton.addEventListener(
-                    "click",
-                    () => {{
-                        overlay.classList.toggle(
-                            "minimized"
+                            #${{overlayId}}
+                            .sf-music-name {{
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                min-width: 0;
+                                overflow: hidden;
+                            }}
+
+                            #${{overlayId}}
+                            .sf-music-name strong {{
+                                overflow: hidden;
+                                color: #ffffff;
+                                font-size: 14px;
+                                text-overflow:
+                                    ellipsis;
+                                white-space: nowrap;
+                            }}
+
+                            #${{overlayId}}
+                            .sf-music-actions {{
+                                display: flex;
+                                gap: 6px;
+                            }}
+
+                            #${{overlayId}}
+                            .sf-music-actions button {{
+                                width: 32px;
+                                height: 32px;
+                                padding: 0;
+                                border: 1px solid
+                                    rgba(
+                                        255,
+                                        255,
+                                        255,
+                                        0.35
+                                    );
+                                border-radius: 999px;
+                                color: #ffffff;
+                                background:
+                                    rgba(0,0,0,0.18);
+                                font-size: 19px;
+                                font-weight: 800;
+                                cursor: pointer;
+                            }}
+
+                            #${{overlayId}}
+                            .sf-music-body {{
+                                padding: 11px;
+                                background: #0d2226;
+                            }}
+
+                            #${{overlayId}}.minimized
+                            .sf-music-body {{
+                                display: none;
+                            }}
+
+                            @media (
+                                max-width: 650px
+                            ) {{
+                                #${{overlayId}} {{
+                                    right: 12px;
+                                    bottom: 12px;
+                                    width:
+                                        calc(
+                                            100vw - 24px
+                                        );
+                                }}
+                            }}
+                        `;
+
+                        doc.head.appendChild(
+                            style
                         );
-                        minimizeButton.textContent =
-                            overlay.classList.contains(
+                    }}
+
+                    doc.body.appendChild(
+                        overlay
+                    );
+
+                    const minimizeButton =
+                        overlay.querySelector(
+                            ".sf-minimize"
+                        );
+                    const closeButton =
+                        overlay.querySelector(
+                            ".sf-close"
+                        );
+                    const header =
+                        overlay.querySelector(
+                            ".sf-music-header"
+                        );
+
+                    minimizeButton.addEventListener(
+                        "click",
+                        () => {{
+                            overlay.classList.toggle(
                                 "minimized"
-                            )
-                            ? "+"
-                            : "−";
-                    }}
-                );
-
-                closeButton.addEventListener(
-                    "click",
-                    () => {{
-                        overlay.remove();
-                    }}
-                );
-
-                let dragging = false;
-                let startX = 0;
-                let startY = 0;
-                let startLeft = 0;
-                let startTop = 0;
-
-                header.addEventListener(
-                    "pointerdown",
-                    event => {{
-                        if (
-                            event.target.closest(
-                                "button"
-                            )
-                        ) {{
-                            return;
-                        }}
-
-                        dragging = true;
-                        const rectangle =
-                            overlay.getBoundingClientRect();
-                        startX = event.clientX;
-                        startY = event.clientY;
-                        startLeft = rectangle.left;
-                        startTop = rectangle.top;
-
-                        overlay.style.right = "auto";
-                        overlay.style.bottom = "auto";
-                        overlay.style.left =
-                            `${{startLeft}}px`;
-                        overlay.style.top =
-                            `${{startTop}}px`;
-
-                        header.setPointerCapture(
-                            event.pointerId
-                        );
-                    }}
-                );
-
-                header.addEventListener(
-                    "pointermove",
-                    event => {{
-                        if (!dragging) {{
-                            return;
-                        }}
-
-                        const nextLeft =
-                            startLeft
-                            + event.clientX
-                            - startX;
-                        const nextTop =
-                            startTop
-                            + event.clientY
-                            - startY;
-
-                        const maximumLeft =
-                            doc.documentElement.clientWidth
-                            - overlay.offsetWidth;
-                        const maximumTop =
-                            doc.documentElement.clientHeight
-                            - overlay.offsetHeight;
-
-                        overlay.style.left =
-                            `${{Math.max(
-                                0,
-                                Math.min(
-                                    maximumLeft,
-                                    nextLeft
+                            );
+                            minimizeButton.textContent =
+                                overlay.classList
+                                .contains(
+                                    "minimized"
                                 )
-                            )}}px`;
-                        overlay.style.top =
-                            `${{Math.max(
-                                0,
-                                Math.min(
-                                    maximumTop,
-                                    nextTop
+                                ? "+"
+                                : "−";
+                        }}
+                    );
+
+                    closeButton.addEventListener(
+                        "click",
+                        () => {{
+                            overlay.remove();
+                        }}
+                    );
+
+                    let dragging = false;
+                    let startX = 0;
+                    let startY = 0;
+                    let startLeft = 0;
+                    let startTop = 0;
+
+                    header.addEventListener(
+                        "pointerdown",
+                        event => {{
+                            if (
+                                event.target.closest(
+                                    "button"
                                 )
-                            )}}px`;
-                    }}
-                );
+                            ) {{
+                                return;
+                            }}
 
-                header.addEventListener(
-                    "pointerup",
-                    event => {{
-                        dragging = false;
-                        header.releasePointerCapture(
-                            event.pointerId
-                        );
-                    }}
-                );
-            }} catch (error) {{
-                console.warn(
-                    "StudyFlow could not create the music overlay.",
-                    error
-                );
-            }}
-        }})();
-    </script>
-    """
+                            dragging = true;
+                            const rectangle =
+                                overlay
+                                .getBoundingClientRect();
+                            startX = event.clientX;
+                            startY = event.clientY;
+                            startLeft =
+                                rectangle.left;
+                            startTop =
+                                rectangle.top;
 
-    components.html(
-        overlay_script,
+                            overlay.style.right =
+                                "auto";
+                            overlay.style.bottom =
+                                "auto";
+                            overlay.style.left =
+                                `${{startLeft}}px`;
+                            overlay.style.top =
+                                `${{startTop}}px`;
+
+                            header
+                                .setPointerCapture(
+                                    event.pointerId
+                                );
+                        }}
+                    );
+
+                    header.addEventListener(
+                        "pointermove",
+                        event => {{
+                            if (!dragging) {{
+                                return;
+                            }}
+
+                            const nextLeft =
+                                startLeft
+                                + event.clientX
+                                - startX;
+                            const nextTop =
+                                startTop
+                                + event.clientY
+                                - startY;
+
+                            overlay.style.left =
+                                `${{Math.max(
+                                    0,
+                                    Math.min(
+                                        doc
+                                        .documentElement
+                                        .clientWidth
+                                        - overlay
+                                        .offsetWidth,
+                                        nextLeft
+                                    )
+                                )}}px`;
+                            overlay.style.top =
+                                `${{Math.max(
+                                    0,
+                                    Math.min(
+                                        doc
+                                        .documentElement
+                                        .clientHeight
+                                        - overlay
+                                        .offsetHeight,
+                                        nextTop
+                                    )
+                                )}}px`;
+                        }}
+                    );
+
+                    header.addEventListener(
+                        "pointerup",
+                        event => {{
+                            dragging = false;
+                            header
+                                .releasePointerCapture(
+                                    event.pointerId
+                                );
+                        }}
+                    );
+                }} catch (error) {{
+                    console.warn(error);
+                }}
+            }})();
+        </script>
+        """,
         height=0,
         scrolling=False,
     )
@@ -5265,76 +5524,83 @@ def render_persistent_music_overlay() -> None:
 def render_persistent_music_dock() -> None:
     initialize_music_state()
 
-    persistent_url = (
-        st.session_state.persistent_music_url
-    )
-    persistent_title = (
-        st.session_state.persistent_music_title
+    enabled = bool(
+        st.session_state[
+            "music_persistence_enabled"
+        ]
     )
     active = bool(
-        st.session_state.persistent_music_active
+        st.session_state[
+            "persistent_music_active"
+        ]
     )
+    url = st.session_state[
+        "persistent_music_url"
+    ]
+    title = st.session_state[
+        "persistent_music_title"
+    ]
 
-    if not persistent_url:
+    if not enabled and not url:
         return
 
     st.markdown(
-        '<div class="theme-label">Music player</div>',
+        '<div class="theme-label">'
+        "Music persistence"
+        "</div>",
         unsafe_allow_html=True,
     )
 
-    safe_title = html.escape(
-        shorten_text(
-            persistent_title or "Selected music",
-            55,
+    if url:
+        st.markdown(
+            f"""
+            <div class="session-card">
+                <strong>
+                    ♫ {html.escape(
+                        shorten_text(
+                            title
+                            or "Selected music",
+                            45,
+                        )
+                    )}
+                </strong><br>
+                <span>
+                    {
+                        "Automatic mode is on"
+                        if enabled
+                        else "Automatic mode is off"
+                    }
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
-    )
-
-    status_text = (
-        "Floating player enabled"
-        if active
-        else "Player is currently hidden"
-    )
-
-    st.markdown(
-        f"""
-        <div class="session-card">
-            <strong>♫ {safe_title}</strong><br>
-            <span>{status_text}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     if active:
         if st.button(
             "■ Stop floating player",
-            key="stop_persistent_music",
+            key="stop_global_music",
             use_container_width=True,
         ):
             stop_persistent_music()
             st.rerun()
-    else:
+    elif enabled and url:
         if st.button(
-            "▶ Show floating player",
-            key="show_persistent_music",
+            "▶ Resume selected music",
+            key="resume_global_music",
             use_container_width=True,
         ):
             activate_persistent_music(
-                persistent_url,
-                persistent_title,
+                url,
+                title,
+                loop=bool(
+                    st.session_state[
+                        "persistent_music_loop"
+                    ]
+                ),
+                force_reload=True,
             )
             st.rerun()
-
-    if st.button(
-        "Clear selected music",
-        key="clear_persistent_music",
-        use_container_width=True,
-    ):
-        stop_persistent_music()
-        st.session_state.persistent_music_url = ""
-        st.session_state.persistent_music_title = ""
-        st.rerun()
 
 def normalize_music_url(url: str) -> str:
     clean_url = url.strip()
@@ -5908,6 +6174,55 @@ def render_focus_sound_generator(
     )
 
 
+def render_global_focus_sound_controls() -> None:
+    white_col, brown_col, stop_col = (
+        st.columns(3)
+    )
+
+    with white_col:
+        if st.button(
+            "White noise",
+            key="global_white_noise",
+            use_container_width=True,
+        ):
+            activate_persistent_music(
+                generate_focus_noise_data_url(
+                    "white"
+                ),
+                "White noise",
+                loop=True,
+                force_reload=True,
+            )
+            st.rerun()
+
+    with brown_col:
+        if st.button(
+            "Brown noise",
+            key="global_brown_noise",
+            use_container_width=True,
+        ):
+            activate_persistent_music(
+                generate_focus_noise_data_url(
+                    "brown"
+                ),
+                "Brown noise",
+                loop=True,
+                force_reload=True,
+            )
+            st.rerun()
+
+    with stop_col:
+        if st.button(
+            "Stop sound",
+            key="stop_global_focus_sound",
+            use_container_width=True,
+            disabled=not st.session_state[
+                "persistent_music_active"
+            ],
+        ):
+            stop_persistent_music()
+            st.rerun()
+
 def search_focus_music(
     query: str,
     api_key: str,
@@ -5973,25 +6288,22 @@ def render_focus_music_search_player(
     selected_index = max(
         0,
         min(
-            int(st.session_state.music_selected_index),
+            int(
+                st.session_state[
+                    "music_selected_index"
+                ]
+            ),
             len(videos) - 1,
         ),
     )
-    st.session_state.music_selected_index = selected_index
-    selected_video = videos[selected_index]
+    st.session_state.music_selected_index = (
+        selected_index
+    )
+    selected_video = videos[
+        selected_index
+    ]
 
-    safe_title = html.escape(
-        selected_video["title"]
-    )
-    safe_channel = html.escape(
-        selected_video["channel"]
-    )
-    duration_text = selected_video.get(
-        "duration_text",
-        "Duration unavailable",
-    )
-
-    remember_persistent_music(
+    auto_activate_persistent_music(
         selected_video["url"],
         selected_video["title"],
     )
@@ -6000,60 +6312,45 @@ def render_focus_music_search_player(
         f"""
         <div class="music-player-shell">
             <div class="youtube-player-title">
-                {safe_title}
+                {html.escape(
+                    selected_video["title"]
+                )}
             </div>
             <div class="youtube-player-meta">
-                {safe_channel} ·
-                {format_youtube_date(selected_video["published_at"])}
-                · {duration_text}
+                {html.escape(
+                    selected_video["channel"]
+                )} ·
+                {format_youtube_date(
+                    selected_video[
+                        "published_at"
+                    ]
+                )} ·
+                {selected_video.get(
+                    "duration_text",
+                    "Duration unavailable",
+                )}
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.video(selected_video["url"])
-
-    keep_col, stop_col = st.columns([2, 1])
-
-    with keep_col:
-        if st.button(
-            "♫ Keep playing on site",
-            key=(
-                "activate_music_overlay_"
-                f"{selected_video['video_id']}"
-            ),
-            type="primary",
-            use_container_width=True,
-        ):
-            activate_persistent_music(
-                selected_video["url"],
-                selected_video["title"],
-            )
-            st.rerun()
-
-    with stop_col:
-        if st.button(
-            "Stop floating player",
-            key=(
-                "stop_music_overlay_"
-                f"{selected_video['video_id']}"
-            ),
-            use_container_width=True,
-            disabled=not st.session_state[
-                "persistent_music_active"
-            ],
-        ):
-            stop_persistent_music()
-            st.rerun()
-
-    st.caption(
-        "The floating player stays on top of StudyFlow while "
-        "you switch pages. You can drag, minimize, or close it."
+    st.video(
+        selected_video["url"]
     )
 
-    previous_col, counter_col, next_col = st.columns(
-        [1, 1.25, 1]
+    if st.session_state[
+        "music_persistence_enabled"
+    ]:
+        st.success(
+            "This selection is automatically "
+            "playing in the floating player."
+        )
+
+    previous_col, counter_col, next_col = (
+        st.columns(
+            [1, 1.25, 1]
+        )
     )
 
     with previous_col:
@@ -6076,7 +6373,8 @@ def render_focus_music_search_player(
                 color:var(--text-soft);
                 padding:0.72rem 0;
                 font-weight:700;">
-                Result {selected_index + 1} of {len(videos)}
+                Result {selected_index + 1}
+                of {len(videos)}
             </div>
             """,
             unsafe_allow_html=True,
@@ -6093,6 +6391,7 @@ def render_focus_music_search_player(
                 selected_index + 1
             ) % len(videos)
             st.rerun()
+
 
 
 
@@ -6165,8 +6464,8 @@ def focus_music_page() -> None:
 
     st.subheader("Focus Music")
     st.caption(
-        "Search by song or artist, paste a playlist link, "
-        "upload audio, or use simple focus sounds."
+        "Search music, paste a link, upload audio, "
+        "or use browser focus sounds."
     )
 
     st.markdown(
@@ -6179,8 +6478,8 @@ def focus_music_page() -> None:
                         Music for focused study
                     </div>
                     <div class="music-subtitle">
-                        Search for a song, artist, album, playlist,
-                        lo-fi mix, soundtrack, or study-music topic.
+                        One general option controls every
+                        music source in StudyFlow.
                     </div>
                 </div>
             </div>
@@ -6189,7 +6488,70 @@ def focus_music_page() -> None:
         unsafe_allow_html=True,
     )
 
-    youtube_api_key = get_default_youtube_api_key()
+    persistence_choice = st.toggle(
+        "Keep all music playing while I navigate StudyFlow",
+        value=bool(
+            st.session_state[
+                "music_persistence_enabled"
+            ]
+        ),
+        key="all_music_persistence_choice",
+        help=(
+            "Applies to searched music, pasted links, "
+            "uploaded audio, white noise, and brown noise."
+        ),
+    )
+
+    if (
+        persistence_choice
+        != st.session_state[
+            "music_persistence_enabled"
+        ]
+    ):
+        st.session_state[
+            "music_persistence_enabled"
+        ] = persistence_choice
+
+        if persistence_choice:
+            if st.session_state[
+                "persistent_music_url"
+            ]:
+                activate_persistent_music(
+                    st.session_state[
+                        "persistent_music_url"
+                    ],
+                    st.session_state[
+                        "persistent_music_title"
+                    ],
+                    loop=bool(
+                        st.session_state[
+                            "persistent_music_loop"
+                        ]
+                    ),
+                    force_reload=True,
+                )
+        else:
+            stop_persistent_music()
+
+        st.rerun()
+
+    if st.session_state[
+        "music_persistence_enabled"
+    ]:
+        st.success(
+            "Automatic music persistence is on. "
+            "Every new music source will use "
+            "the floating player."
+        )
+    else:
+        st.info(
+            "Turn on the option above to keep "
+            "all music playing across pages."
+        )
+
+    youtube_api_key = (
+        get_default_youtube_api_key()
+    )
 
     if youtube_api_key:
         st.success(
@@ -6197,8 +6559,9 @@ def focus_music_page() -> None:
         )
     else:
         st.error(
-            "Music search is not connected. Add YOUTUBE_API_KEY "
-            "to Streamlit or Codespaces secrets and restart the app."
+            "Music search is not connected. Add "
+            "YOUTUBE_API_KEY to Streamlit or "
+            "Codespaces secrets and restart the app."
         )
 
     with st.form(
@@ -6208,27 +6571,37 @@ def focus_music_page() -> None:
     ):
         search_query = st.text_input(
             "Search music",
-            value=st.session_state.music_search_query,
+            value=(
+                st.session_state[
+                    "music_search_query"
+                ]
+            ),
             placeholder=(
-                "Search a song, artist, album, lo-fi mix, "
-                "soundtrack, or study playlist..."
+                "Search a song, artist, album, "
+                "lo-fi mix, soundtrack, or playlist..."
             ),
             label_visibility="collapsed",
         )
 
-        search_col, clear_col = st.columns([2, 1])
+        search_col, clear_col = (
+            st.columns([2, 1])
+        )
 
         with search_col:
-            search_clicked = st.form_submit_button(
-                "🔍 Search music",
-                type="primary",
-                use_container_width=True,
+            search_clicked = (
+                st.form_submit_button(
+                    "🔍 Search music",
+                    type="primary",
+                    use_container_width=True,
+                )
             )
 
         with clear_col:
-            clear_search_clicked = st.form_submit_button(
-                "Clear results",
-                use_container_width=True,
+            clear_search_clicked = (
+                st.form_submit_button(
+                    "Clear results",
+                    use_container_width=True,
+                )
             )
 
     if clear_search_clicked:
@@ -6247,7 +6620,8 @@ def focus_music_page() -> None:
             )
         elif not search_query.strip():
             st.session_state.music_search_error = (
-                "Enter a song, artist, album, or study-music topic."
+                "Enter a song, artist, album, "
+                "or study-music topic."
             )
         else:
             try:
@@ -6281,20 +6655,25 @@ def focus_music_page() -> None:
 
                 if not music_results:
                     st.session_state.music_search_error = (
-                        "No matching music results were found."
+                        "No matching music results "
+                        "were found."
                     )
 
             except RuntimeError as error:
                 st.session_state.music_search_results = []
                 st.session_state.music_search_next_token = ""
-                st.session_state.music_search_error = str(error)
+                st.session_state.music_search_error = (
+                    str(error)
+                )
 
     if st.session_state.music_search_error:
         st.error(
             st.session_state.music_search_error
         )
 
-    music_results = st.session_state.music_search_results
+    music_results = (
+        st.session_state.music_search_results
+    )
 
     if music_results:
         st.markdown("### Now playing")
@@ -6306,7 +6685,8 @@ def focus_music_page() -> None:
             f"Showing {len(music_results)} result(s)"
             + (
                 " from approximately "
-                f"{st.session_state.music_search_total:,} matches."
+                f"{st.session_state.music_search_total:,} "
+                "matches."
                 if st.session_state.music_search_total
                 else "."
             )
@@ -6321,7 +6701,7 @@ def focus_music_page() -> None:
         )
 
         if next_page_token:
-            left_space, more_col, right_space = st.columns(
+            _, more_col, _ = st.columns(
                 [1.5, 1, 1.5]
             )
 
@@ -6340,56 +6720,38 @@ def focus_music_page() -> None:
                                 new_next_token,
                                 total_results,
                             ) = search_focus_music(
-                                st.session_state.music_search_query,
+                                st.session_state[
+                                    "music_search_query"
+                                ],
                                 youtube_api_key,
-                                page_token=next_page_token,
+                                page_token=(
+                                    next_page_token
+                                ),
                                 max_results=12,
                             )
 
-                        st.session_state.music_search_results = (
-                            unique_youtube_videos(
-                                music_results + more_results
-                            )
+                        st.session_state[
+                            "music_search_results"
+                        ] = unique_youtube_videos(
+                            music_results
+                            + more_results
                         )
-                        st.session_state.music_search_next_token = (
-                            new_next_token
-                        )
-                        st.session_state.music_search_total = (
-                            total_results
-                        )
+                        st.session_state[
+                            "music_search_next_token"
+                        ] = new_next_token
+                        st.session_state[
+                            "music_search_total"
+                        ] = total_results
                         st.rerun()
 
                     except RuntimeError as error:
                         st.error(str(error))
 
     with st.expander(
-        "Paste a Spotify, YouTube, or direct-audio link",
+        "Paste a Spotify, YouTube, "
+        "or direct-audio link",
         expanded=not bool(music_results),
     ):
-        st.markdown(
-            """
-            <span class="music-supported">
-                Spotify tracks
-            </span>
-            <span class="music-supported">
-                Spotify playlists
-            </span>
-            <span class="music-supported">
-                Spotify albums
-            </span>
-            <span class="music-supported">
-                YouTube videos
-            </span>
-            <span class="music-supported">
-                YouTube playlists
-            </span>
-            <span class="music-supported">
-                Direct audio files
-            </span>
-            """,
-            unsafe_allow_html=True,
-        )
-
         with st.form(
             "focus_music_url_form",
             clear_on_submit=False,
@@ -6397,26 +6759,36 @@ def focus_music_page() -> None:
         ):
             music_url = st.text_input(
                 "Music link",
-                value=st.session_state.music_embed_url,
+                value=(
+                    st.session_state[
+                        "music_embed_url"
+                    ]
+                ),
                 placeholder=(
-                    "Paste a Spotify playlist, YouTube video, "
-                    "YouTube playlist, or direct MP3 link..."
+                    "Paste a Spotify or YouTube "
+                    "link, playlist, or direct MP3 URL..."
                 ),
             )
 
-            load_col, clear_col = st.columns(2)
+            load_col, clear_col = (
+                st.columns(2)
+            )
 
             with load_col:
-                load_clicked = st.form_submit_button(
-                    "▶ Load link",
-                    type="primary",
-                    use_container_width=True,
+                load_clicked = (
+                    st.form_submit_button(
+                        "▶ Load link",
+                        type="primary",
+                        use_container_width=True,
+                    )
                 )
 
             with clear_col:
-                clear_clicked = st.form_submit_button(
-                    "Clear player",
-                    use_container_width=True,
+                clear_clicked = (
+                    st.form_submit_button(
+                        "Clear player",
+                        use_container_width=True,
+                    )
                 )
 
         if clear_clicked:
@@ -6434,22 +6806,29 @@ def focus_music_page() -> None:
                     "Paste a music link first."
                 )
             elif (
-                spotify_embed_details(normalized_url)
-                or youtube_embed_details(normalized_url)
-                or direct_audio_url(normalized_url)
+                spotify_embed_details(
+                    normalized_url
+                )
+                or youtube_embed_details(
+                    normalized_url
+                )
+                or direct_audio_url(
+                    normalized_url
+                )
             ):
                 st.session_state.music_embed_url = (
                     normalized_url
                 )
                 st.session_state.music_embed_error = ""
-                remember_persistent_music(
+
+                auto_activate_persistent_music(
                     normalized_url,
                     "Pasted music link",
                 )
             else:
                 st.session_state.music_embed_error = (
-                    "That link is not recognized. Use a Spotify "
-                    "track/playlist/album, a YouTube video/playlist, "
+                    "That link is not recognized. "
+                    "Use Spotify, YouTube, a playlist, "
                     "or a direct audio-file URL."
                 )
 
@@ -6459,55 +6838,42 @@ def focus_music_page() -> None:
             )
 
         if st.session_state.music_embed_url:
-            st.markdown("#### Embedded link player")
+            st.markdown(
+                "#### Embedded link player"
+            )
 
             with st.container(border=True):
                 rendered = render_music_from_url(
-                    st.session_state.music_embed_url
+                    st.session_state[
+                        "music_embed_url"
+                    ]
                 )
 
                 if not rendered:
                     st.error(
-                        "The player could not be loaded from this link."
+                        "The player could not be "
+                        "loaded from this link."
                     )
 
-            link_keep_col, link_stop_col = st.columns(
-                [2, 1]
-            )
-
-            with link_keep_col:
-                if st.button(
-                    "♫ Keep this link playing on site",
-                    key="activate_pasted_music_overlay",
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    activate_persistent_music(
-                        st.session_state.music_embed_url,
-                        "Pasted music link",
-                    )
-                    st.rerun()
-
-            with link_stop_col:
-                if st.button(
-                    "Stop floating player",
-                    key="stop_pasted_music_overlay",
-                    use_container_width=True,
-                    disabled=not st.session_state[
-                        "persistent_music_active"
-                    ],
-                ):
-                    stop_persistent_music()
-                    st.rerun()
+            if st.session_state[
+                "music_persistence_enabled"
+            ]:
+                st.success(
+                    "This link is automatically loaded "
+                    "into the floating player."
+                )
 
     st.divider()
 
-    upload_col, sounds_col = st.columns(
-        [1, 1]
+    upload_col, sounds_col = (
+        st.columns([1, 1])
     )
 
     with upload_col:
-        st.markdown("### Upload your own audio")
+        st.markdown(
+            "### Upload your own audio"
+        )
+
         uploaded_audio = st.file_uploader(
             "Choose an audio file",
             type=[
@@ -6519,24 +6885,69 @@ def focus_music_page() -> None:
                 "flac",
             ],
             help=(
-                "The selected file remains available only "
-                "during the current app session."
+                "Files up to 25 MB can use "
+                "the persistent floating player."
             ),
         )
 
         if uploaded_audio:
             st.audio(uploaded_audio)
 
+            try:
+                (
+                    audio_name,
+                    audio_data_url,
+                    audio_signature,
+                ) = uploaded_audio_to_data_url(
+                    uploaded_audio
+                )
+
+                if (
+                    st.session_state[
+                        "uploaded_music_signature"
+                    ]
+                    != audio_signature
+                ):
+                    st.session_state[
+                        "uploaded_music_signature"
+                    ] = audio_signature
+
+                    auto_activate_persistent_music(
+                        audio_data_url,
+                        audio_name,
+                    )
+
+                if st.session_state[
+                    "music_persistence_enabled"
+                ]:
+                    st.success(
+                        "The uploaded audio is "
+                        "automatically in the "
+                        "floating player."
+                    )
+
+            except ValueError as error:
+                st.warning(str(error))
+
     with sounds_col:
         st.markdown("### Focus sounds")
-        render_focus_sound_generator(
-            st.session_state.app_theme
-        )
+
+        if st.session_state[
+            "music_persistence_enabled"
+        ]:
+            render_global_focus_sound_controls()
+        else:
+            render_focus_sound_generator(
+                st.session_state.app_theme
+            )
 
     st.info(
-        "Click “Keep playing on site” to use the floating player. "
-        "It remains visible while you move between StudyFlow pages."
+        "When the general option is enabled, "
+        "searched music, pasted links, uploaded audio, "
+        "white noise, and brown noise all use the "
+        "same floating player across StudyFlow."
     )
+
 
 
 def additional_resources_page() -> None:
@@ -7450,7 +7861,6 @@ with st.sidebar:
     st.metric("Urgent / overdue", urgent_count)
     st.metric("Focused today", f"{today_minutes} min")
 
-render_persistent_music_overlay()
 render_header()
 
 if page == "🏠 Dashboard":
@@ -7465,3 +7875,5 @@ elif page == "🗓️ Study Plan":
     study_plan_page(tasks, availability)
 else:
     additional_resources_page()
+
+render_persistent_music_overlay()
