@@ -4063,11 +4063,18 @@ def initialize_music_state() -> None:
     defaults = {
         "music_embed_url": "",
         "music_embed_error": "",
+        "music_search_query": "",
+        "music_search_results": [],
+        "music_search_next_token": "",
+        "music_search_total": 0,
+        "music_search_error": "",
+        "music_selected_index": 0,
     }
 
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 
 
 def normalize_music_url(url: str) -> str:
@@ -4642,13 +4649,220 @@ def render_focus_sound_generator(
     )
 
 
+def search_focus_music(
+    query: str,
+    api_key: str,
+    page_token: str = "",
+    max_results: int = 12,
+) -> tuple[list[dict], str, int]:
+    clean_query = query.strip()
+
+    if not clean_query:
+        raise RuntimeError(
+            "Enter a song, artist, album, or study-music topic."
+        )
+
+    music_terms = {
+        "music",
+        "song",
+        "songs",
+        "audio",
+        "playlist",
+        "lofi",
+        "instrumental",
+        "soundtrack",
+    }
+    query_words = {
+        word.strip(".,!?").lower()
+        for word in clean_query.split()
+    }
+
+    search_query = (
+        clean_query
+        if query_words & music_terms
+        else f"{clean_query} music"
+    )
+
+    (
+        videos,
+        next_page_token,
+        total_results,
+        _,
+    ) = search_youtube_watcher(
+        search_query,
+        api_key,
+        "Topic",
+        "Relevant",
+        "Videos",
+        page_token=page_token,
+        max_results=max_results,
+    )
+
+    return (
+        unique_youtube_videos(videos),
+        next_page_token,
+        total_results,
+    )
+
+
+def render_focus_music_search_player(
+    videos: list[dict],
+) -> None:
+    if not videos:
+        return
+
+    selected_index = max(
+        0,
+        min(
+            int(st.session_state.music_selected_index),
+            len(videos) - 1,
+        ),
+    )
+    st.session_state.music_selected_index = selected_index
+    selected_video = videos[selected_index]
+
+    safe_title = html.escape(
+        selected_video["title"]
+    )
+    safe_channel = html.escape(
+        selected_video["channel"]
+    )
+    duration_text = selected_video.get(
+        "duration_text",
+        "Duration unavailable",
+    )
+
+    st.markdown(
+        f"""
+        <div class="music-player-shell">
+            <div class="youtube-player-title">
+                {safe_title}
+            </div>
+            <div class="youtube-player-meta">
+                {safe_channel} ·
+                {format_youtube_date(selected_video["published_at"])}
+                · {duration_text}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.video(selected_video["url"])
+
+    previous_col, counter_col, next_col = st.columns(
+        [1, 1.25, 1]
+    )
+
+    with previous_col:
+        if st.button(
+            "← Previous",
+            key="music_previous_result",
+            use_container_width=True,
+            disabled=len(videos) <= 1,
+        ):
+            st.session_state.music_selected_index = (
+                selected_index - 1
+            ) % len(videos)
+            st.rerun()
+
+    with counter_col:
+        st.markdown(
+            f"""
+            <div style="
+                text-align:center;
+                color:var(--text-soft);
+                padding:0.72rem 0;
+                font-weight:700;">
+                Result {selected_index + 1} of {len(videos)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with next_col:
+        if st.button(
+            "Next →",
+            key="music_next_result",
+            use_container_width=True,
+            disabled=len(videos) <= 1,
+        ):
+            st.session_state.music_selected_index = (
+                selected_index + 1
+            ) % len(videos)
+            st.rerun()
+
+
+def render_focus_music_suggestions(
+    videos: list[dict],
+) -> None:
+    if not videos:
+        return
+
+    st.markdown("### Music suggestions")
+
+    for row_start in range(0, len(videos), 3):
+        columns = st.columns(3)
+        row_videos = videos[row_start:row_start + 3]
+
+        for offset, (column, video) in enumerate(
+            zip(columns, row_videos)
+        ):
+            result_index = row_start + offset
+
+            with column:
+                with st.container(border=True):
+                    if video.get("thumbnail"):
+                        st.image(
+                            video["thumbnail"],
+                            use_container_width=True,
+                        )
+
+                    st.markdown(
+                        f"""
+                        <div class="youtube-result-title">
+                            {html.escape(shorten_text(video["title"], 84))}
+                        </div>
+                        <div class="youtube-result-meta">
+                            {html.escape(video["channel"])}<br>
+                            {format_youtube_date(video["published_at"])}
+                            · {video.get("duration_text", "Duration unavailable")}
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    play_col, open_col = st.columns(2)
+
+                    with play_col:
+                        if st.button(
+                            "▶ Play",
+                            key=(
+                                "music_play_result_"
+                                f"{video['video_id']}_"
+                                f"{result_index}"
+                            ),
+                            use_container_width=True,
+                        ):
+                            st.session_state.music_selected_index = (
+                                result_index
+                            )
+                            st.rerun()
+
+                    with open_col:
+                        st.link_button(
+                            "Open ↗",
+                            video["url"],
+                            use_container_width=True,
+                        )
+
 def focus_music_page() -> None:
     initialize_music_state()
 
     st.subheader("Focus Music")
     st.caption(
-        "Play Spotify or YouTube inside StudyFlow, "
-        "upload your own audio, or use simple focus sounds."
+        "Search by song or artist, paste a playlist link, "
+        "upload audio, or use simple focus sounds."
     )
 
     st.markdown(
@@ -4661,8 +4875,8 @@ def focus_music_page() -> None:
                         Music for focused study
                     </div>
                     <div class="music-subtitle">
-                        Paste a playlist, track, or video link
-                        and keep it alongside your planner and timer.
+                        Search for a song, artist, album, playlist,
+                        lo-fi mix, soundtrack, or study-music topic.
                     </div>
                 </div>
             </div>
@@ -4671,10 +4885,185 @@ def focus_music_page() -> None:
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        """
-        <div class="music-help-card">
-            <strong>Supported links</strong><br>
+    youtube_api_key = get_default_youtube_api_key()
+
+    if youtube_api_key:
+        st.success(
+            "Music search is connected through YouTube."
+        )
+    else:
+        st.error(
+            "Music search is not connected. Add YOUTUBE_API_KEY "
+            "to Streamlit or Codespaces secrets and restart the app."
+        )
+
+    with st.form(
+        "focus_music_search_form",
+        clear_on_submit=False,
+        border=True,
+    ):
+        search_query = st.text_input(
+            "Search music",
+            value=st.session_state.music_search_query,
+            placeholder=(
+                "Search a song, artist, album, lo-fi mix, "
+                "soundtrack, or study playlist..."
+            ),
+            label_visibility="collapsed",
+        )
+
+        search_col, clear_col = st.columns([2, 1])
+
+        with search_col:
+            search_clicked = st.form_submit_button(
+                "🔍 Search music",
+                type="primary",
+                use_container_width=True,
+            )
+
+        with clear_col:
+            clear_search_clicked = st.form_submit_button(
+                "Clear results",
+                use_container_width=True,
+            )
+
+    if clear_search_clicked:
+        st.session_state.music_search_query = ""
+        st.session_state.music_search_results = []
+        st.session_state.music_search_next_token = ""
+        st.session_state.music_search_total = 0
+        st.session_state.music_search_error = ""
+        st.session_state.music_selected_index = 0
+        st.rerun()
+
+    if search_clicked:
+        if not youtube_api_key:
+            st.session_state.music_search_error = (
+                "YOUTUBE_API_KEY is not configured."
+            )
+        elif not search_query.strip():
+            st.session_state.music_search_error = (
+                "Enter a song, artist, album, or study-music topic."
+            )
+        else:
+            try:
+                with st.spinner(
+                    "Searching for music..."
+                ):
+                    (
+                        music_results,
+                        next_page_token,
+                        total_results,
+                    ) = search_focus_music(
+                        search_query,
+                        youtube_api_key,
+                        max_results=12,
+                    )
+
+                st.session_state.music_search_query = (
+                    search_query.strip()
+                )
+                st.session_state.music_search_results = (
+                    music_results
+                )
+                st.session_state.music_search_next_token = (
+                    next_page_token
+                )
+                st.session_state.music_search_total = (
+                    total_results
+                )
+                st.session_state.music_selected_index = 0
+                st.session_state.music_search_error = ""
+
+                if not music_results:
+                    st.session_state.music_search_error = (
+                        "No matching music results were found."
+                    )
+
+            except RuntimeError as error:
+                st.session_state.music_search_results = []
+                st.session_state.music_search_next_token = ""
+                st.session_state.music_search_error = str(error)
+
+    if st.session_state.music_search_error:
+        st.error(
+            st.session_state.music_search_error
+        )
+
+    music_results = st.session_state.music_search_results
+
+    if music_results:
+        st.markdown("### Now playing")
+        render_focus_music_search_player(
+            music_results
+        )
+
+        st.caption(
+            f"Showing {len(music_results)} result(s)"
+            + (
+                " from approximately "
+                f"{st.session_state.music_search_total:,} matches."
+                if st.session_state.music_search_total
+                else "."
+            )
+        )
+
+        render_focus_music_suggestions(
+            music_results
+        )
+
+        next_page_token = (
+            st.session_state.music_search_next_token
+        )
+
+        if next_page_token:
+            left_space, more_col, right_space = st.columns(
+                [1.5, 1, 1.5]
+            )
+
+            with more_col:
+                if st.button(
+                    "Show more music",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    try:
+                        with st.spinner(
+                            "Loading more music..."
+                        ):
+                            (
+                                more_results,
+                                new_next_token,
+                                total_results,
+                            ) = search_focus_music(
+                                st.session_state.music_search_query,
+                                youtube_api_key,
+                                page_token=next_page_token,
+                                max_results=12,
+                            )
+
+                        st.session_state.music_search_results = (
+                            unique_youtube_videos(
+                                music_results + more_results
+                            )
+                        )
+                        st.session_state.music_search_next_token = (
+                            new_next_token
+                        )
+                        st.session_state.music_search_total = (
+                            total_results
+                        )
+                        st.rerun()
+
+                    except RuntimeError as error:
+                        st.error(str(error))
+
+    with st.expander(
+        "Paste a Spotify, YouTube, or direct-audio link",
+        expanded=not bool(music_results),
+    ):
+        st.markdown(
+            """
             <span class="music-supported">
                 Spotify tracks
             </span>
@@ -4693,87 +5082,86 @@ def focus_music_page() -> None:
             <span class="music-supported">
                 Direct audio files
             </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    with st.form(
-        "focus_music_url_form",
-        clear_on_submit=False,
-        border=True,
-    ):
-        music_url = st.text_input(
-            "Spotify, YouTube, or audio URL",
-            value=st.session_state.music_embed_url,
-            placeholder=(
-                "Paste a Spotify playlist, YouTube video, "
-                "YouTube playlist, or direct MP3 link..."
-            ),
+            """,
+            unsafe_allow_html=True,
         )
 
-        load_col, clear_col = st.columns(2)
-
-        with load_col:
-            load_clicked = st.form_submit_button(
-                "▶ Load music",
-                type="primary",
-                use_container_width=True,
-            )
-
-        with clear_col:
-            clear_clicked = st.form_submit_button(
-                "Clear player",
-                use_container_width=True,
-            )
-
-    if clear_clicked:
-        st.session_state.music_embed_url = ""
-        st.session_state.music_embed_error = ""
-        st.rerun()
-
-    if load_clicked:
-        normalized_url = normalize_music_url(
-            music_url
-        )
-
-        if not normalized_url:
-            st.session_state.music_embed_error = (
-                "Paste a music link first."
-            )
-        elif (
-            spotify_embed_details(normalized_url)
-            or youtube_embed_details(normalized_url)
-            or direct_audio_url(normalized_url)
+        with st.form(
+            "focus_music_url_form",
+            clear_on_submit=False,
+            border=False,
         ):
-            st.session_state.music_embed_url = (
-                normalized_url
-            )
-            st.session_state.music_embed_error = ""
-        else:
-            st.session_state.music_embed_error = (
-                "That link is not recognized. Use a Spotify "
-                "track/playlist/album, a YouTube video/playlist, "
-                "or a direct audio-file URL."
+            music_url = st.text_input(
+                "Music link",
+                value=st.session_state.music_embed_url,
+                placeholder=(
+                    "Paste a Spotify playlist, YouTube video, "
+                    "YouTube playlist, or direct MP3 link..."
+                ),
             )
 
-    if st.session_state.music_embed_error:
-        st.error(
-            st.session_state.music_embed_error
-        )
+            load_col, clear_col = st.columns(2)
 
-    if st.session_state.music_embed_url:
-        st.markdown("### Embedded player")
-
-        with st.container(border=True):
-            rendered = render_music_from_url(
-                st.session_state.music_embed_url
-            )
-
-            if not rendered:
-                st.error(
-                    "The player could not be loaded from this link."
+            with load_col:
+                load_clicked = st.form_submit_button(
+                    "▶ Load link",
+                    type="primary",
+                    use_container_width=True,
                 )
+
+            with clear_col:
+                clear_clicked = st.form_submit_button(
+                    "Clear player",
+                    use_container_width=True,
+                )
+
+        if clear_clicked:
+            st.session_state.music_embed_url = ""
+            st.session_state.music_embed_error = ""
+            st.rerun()
+
+        if load_clicked:
+            normalized_url = normalize_music_url(
+                music_url
+            )
+
+            if not normalized_url:
+                st.session_state.music_embed_error = (
+                    "Paste a music link first."
+                )
+            elif (
+                spotify_embed_details(normalized_url)
+                or youtube_embed_details(normalized_url)
+                or direct_audio_url(normalized_url)
+            ):
+                st.session_state.music_embed_url = (
+                    normalized_url
+                )
+                st.session_state.music_embed_error = ""
+            else:
+                st.session_state.music_embed_error = (
+                    "That link is not recognized. Use a Spotify "
+                    "track/playlist/album, a YouTube video/playlist, "
+                    "or a direct audio-file URL."
+                )
+
+        if st.session_state.music_embed_error:
+            st.error(
+                st.session_state.music_embed_error
+            )
+
+        if st.session_state.music_embed_url:
+            st.markdown("#### Embedded link player")
+
+            with st.container(border=True):
+                rendered = render_music_from_url(
+                    st.session_state.music_embed_url
+                )
+
+                if not rendered:
+                    st.error(
+                        "The player could not be loaded from this link."
+                    )
 
     st.divider()
 
@@ -4813,6 +5201,7 @@ def focus_music_page() -> None:
         "Changing pages or causing the app to rerun may restart "
         "an embedded player."
     )
+
 
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
