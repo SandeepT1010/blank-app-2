@@ -27,8 +27,60 @@ import streamlit.components.v1 as components
 # APP SETUP
 # ---------------------------------------------------------
 
-APP_NAME = "StudyFlow"
+APP_NAME = "StudyDragon"
+APP_TAGLINE = "Plan clearly. Focus boldly."
 DATABASE_FILE = Path("studyflow.db")
+
+APP_DIRECTORY = Path(__file__).resolve().parent
+LOGO_FILE = APP_DIRECTORY / "studydragon_logo.png"
+
+
+def get_brand_logo_data_uri() -> str:
+    if LOGO_FILE.exists():
+        encoded_logo = base64.b64encode(
+            LOGO_FILE.read_bytes()
+        ).decode("ascii")
+        return f"data:image/png;base64,{encoded_logo}"
+
+    # Fallback mark used only when the logo asset was not deployed.
+    fallback_svg = """
+    <svg xmlns="http://www.w3.org/2000/svg"
+         width="512" height="512" viewBox="0 0 512 512">
+      <ellipse cx="256" cy="270" rx="190" ry="180"
+               fill="#e11d70"/>
+      <ellipse cx="256" cy="270" rx="145" ry="138"
+               fill="#fff8fb"/>
+      <g fill="#1f1f25">
+        <ellipse cx="210" cy="215" rx="6" ry="11"/>
+        <ellipse cx="280" cy="205" rx="6" ry="11"/>
+        <ellipse cx="330" cy="250" rx="6" ry="11"/>
+        <ellipse cx="235" cy="285" rx="6" ry="11"/>
+        <ellipse cx="300" cy="310" rx="6" ry="11"/>
+        <ellipse cx="195" cy="345" rx="6" ry="11"/>
+        <ellipse cx="345" cy="350" rx="6" ry="11"/>
+      </g>
+      <path d="M135 155L72 65l125 72z"
+            fill="#42b96d"/>
+      <path d="M375 155L445 75l-15 125z"
+            fill="#2f9858"/>
+      <path d="M125 365L40 430l118-12z"
+            fill="#42b96d"/>
+      <path d="M385 365l82 72-120-18z"
+            fill="#2f9858"/>
+    </svg>
+    """.strip()
+    encoded_svg = base64.b64encode(
+        fallback_svg.encode("utf-8")
+    ).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded_svg}"
+
+
+LOGO_DATA_URI = get_brand_logo_data_uri()
+PAGE_ICON = (
+    LOGO_FILE.read_bytes()
+    if LOGO_FILE.exists()
+    else "🐉"
+)
 
 DAYS = [
     "Monday",
@@ -47,8 +99,8 @@ PRIORITY_POINTS = {
 }
 
 st.set_page_config(
-    page_title="StudyFlow",
-    page_icon="🌿",
+    page_title=APP_NAME,
+    page_icon=PAGE_ICON,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -232,6 +284,26 @@ def apply_app_theme(theme_name: str) -> None:
             box-shadow: 0 12px 30px var(--shadow);
         }
 
+        .brand-row {
+            display: flex;
+            align-items: center;
+            gap: 0.72rem;
+        }
+
+        .brand-logo {
+            width: 3.15rem;
+            height: 3.15rem;
+            flex: 0 0 auto;
+            object-fit: contain;
+            filter: drop-shadow(
+                0 7px 12px rgba(0, 0, 0, 0.22)
+            );
+        }
+
+        .brand-copy {
+            min-width: 0;
+        }
+
         .brand-title {
             color: #ffffff;
             font-size: 1.38rem;
@@ -316,11 +388,46 @@ def apply_app_theme(theme_name: str) -> None:
             box-shadow: 0 12px 30px var(--shadow);
         }
 
+        .hero-brand-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .hero-logo {
+            width: 5rem;
+            height: 5rem;
+            flex: 0 0 auto;
+            object-fit: contain;
+            filter: drop-shadow(
+                0 10px 20px var(--shadow)
+            );
+        }
+
+        .hero-brand-copy {
+            min-width: 0;
+        }
+
         .hero h1 {
             color: var(--text);
             font-size: 2rem;
             margin: 0;
             letter-spacing: -0.035em;
+        }
+
+        @media (max-width: 650px) {
+            .hero-brand-row {
+                align-items: flex-start;
+            }
+
+            .hero-logo {
+                width: 4rem;
+                height: 4rem;
+            }
+
+            .hero h1 {
+                font-size: 1.65rem;
+            }
         }
 
         .hero p {
@@ -2290,12 +2397,36 @@ def add_study_resource(
     category: str,
     notes: str,
 ) -> tuple[bool, str]:
+    clean_title = title.strip()
     clean_url = resource_url.strip()
+    clean_category = category.strip() or "Other"
 
-    if not clean_url.startswith(("https://", "http://")):
-        return False, "The resource URL must begin with https:// or http://."
+    if not clean_title:
+        return False, "Enter a title before saving."
+
+    if not clean_url.startswith(
+        ("https://", "http://")
+    ):
+        return (
+            False,
+            "The resource URL must begin with "
+            "https:// or http://.",
+        )
 
     with connect() as connection:
+        existing = connection.execute(
+            """
+            SELECT id
+            FROM study_resources
+            WHERE LOWER(resource_url) = LOWER(?)
+            LIMIT 1
+            """,
+            (clean_url,),
+        ).fetchone()
+
+        if existing:
+            return False, "This item is already saved."
+
         connection.execute(
             """
             INSERT INTO study_resources (
@@ -2308,15 +2439,18 @@ def add_study_resource(
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                title.strip(),
+                clean_title,
                 clean_url,
-                category,
+                clean_category,
                 notes.strip(),
-                datetime.now().isoformat(timespec="seconds"),
+                datetime.now().isoformat(
+                    timespec="seconds"
+                ),
             ),
         )
 
-    return True, "Resource saved."
+    return True, "Saved to your library."
+
 
 
 def get_study_resources() -> list[dict]:
@@ -2339,6 +2473,107 @@ def delete_study_resource(resource_id: int) -> None:
             (resource_id,),
         )
 
+
+def is_study_resource_saved(
+    resource_url: str,
+) -> bool:
+    clean_url = resource_url.strip()
+
+    if not clean_url:
+        return False
+
+    with connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id
+            FROM study_resources
+            WHERE LOWER(resource_url) = LOWER(?)
+            LIMIT 1
+            """,
+            (clean_url,),
+        ).fetchone()
+
+    return row is not None
+
+
+def youtube_media_category(
+    video: dict,
+) -> str:
+    return (
+        "Short"
+        if video.get("video_type") == "Short"
+        else "Video"
+    )
+
+
+def youtube_media_notes(
+    video: dict,
+) -> str:
+    details = [
+        str(video.get("channel", "")).strip(),
+        format_youtube_date(
+            video.get("published_at", "")
+        ),
+        str(
+            video.get(
+                "duration_text",
+                "",
+            )
+        ).strip(),
+    ]
+
+    return " · ".join(
+        detail
+        for detail in details
+        if detail
+        and detail != "Date unavailable"
+        and detail != "Duration unavailable"
+    )
+
+
+def save_youtube_media(
+    video: dict,
+    category: str | None = None,
+) -> tuple[bool, str]:
+    return add_study_resource(
+        video.get(
+            "title",
+            "Saved YouTube media",
+        ),
+        video["url"],
+        category or youtube_media_category(video),
+        youtube_media_notes(video),
+    )
+
+
+def render_save_media_button(
+    video: dict,
+    key: str,
+    category: str | None = None,
+    label: str = "♡ Save",
+) -> None:
+    already_saved = is_study_resource_saved(
+        video["url"]
+    )
+
+    if st.button(
+        "✓ Saved" if already_saved else label,
+        key=key,
+        use_container_width=True,
+        disabled=already_saved,
+    ):
+        success, message = save_youtube_media(
+            video,
+            category=category,
+        )
+
+        st.toast(
+            message,
+            icon="✅" if success else "ℹ️",
+        )
+
+        if success:
+            st.rerun()
 
 def get_default_youtube_api_key() -> str:
     environment_key = os.getenv("YOUTUBE_API_KEY", "").strip()
@@ -2377,7 +2612,7 @@ def youtube_api_request(
         request_url,
         headers={
             "Accept": "application/json",
-            "User-Agent": "StudyFlow/1.0",
+            "User-Agent": "StudyDragon/1.0",
         },
     )
 
@@ -3694,14 +3929,27 @@ def render_live_timer() -> None:
 
 def render_header() -> None:
     st.markdown(
-        """
+        f"""
         <div class="hero">
-            <h1>🌿 StudyFlow</h1>
-            <p>A calm, simple place to organize tasks, focus, and follow a realistic study plan.</p>
+            <div class="hero-brand-row">
+                <img
+                    class="hero-logo"
+                    src="{LOGO_DATA_URI}"
+                    alt="Half-cut dragonfruit logo"
+                >
+                <div class="hero-brand-copy">
+                    <h1>{APP_NAME}</h1>
+                    <p>
+                        A calm, simple place to organize tasks,
+                        focus, and follow a realistic study plan.
+                    </p>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
 
 
 def render_task_card(task: dict) -> None:
@@ -4674,7 +4922,7 @@ def study_plan_page(
     st.subheader("Study Plan")
     st.caption(
         "Add one or more free-time periods for each day. "
-        "StudyFlow will place sessions inside every saved window."
+        "StudyDragon will place sessions inside every saved window."
     )
 
     render_weekly_study_times_editor(
@@ -4916,17 +5164,43 @@ def render_standard_youtube_player(
             </div>
             <div class="youtube-player-meta">
                 {safe_channel} ·
-                {format_youtube_date(selected_video["published_at"])}
+                {format_youtube_date(
+                    selected_video["published_at"]
+                )}
                 · {duration_text}
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.video(selected_video["url"])
 
-    previous_col, counter_col, next_col = st.columns(
-        [1, 1.4, 1]
+    st.video(
+        selected_video["url"]
+    )
+
+    save_col, open_col = st.columns(2)
+
+    with save_col:
+        render_save_media_button(
+            selected_video,
+            key=(
+                "save_selected_youtube_"
+                f"{selected_video['video_id']}"
+            ),
+            label="♡ Save video",
+        )
+
+    with open_col:
+        st.link_button(
+            "Open on YouTube ↗",
+            selected_video["url"],
+            use_container_width=True,
+        )
+
+    previous_col, counter_col, next_col = (
+        st.columns(
+            [1, 1.4, 1]
+        )
     )
 
     with previous_col:
@@ -4941,7 +5215,8 @@ def render_standard_youtube_player(
             disabled=len(playlist) <= 1,
         ):
             previous_video = playlist[
-                (current_index - 1) % len(playlist)
+                (current_index - 1)
+                % len(playlist)
             ]
             set_youtube_watcher_selection(
                 previous_video,
@@ -4957,7 +5232,8 @@ def render_standard_youtube_player(
                 color:var(--text-soft);
                 padding:0.72rem 0;
                 font-weight:700;">
-                Video {current_index + 1} of {len(playlist)}
+                Video {current_index + 1}
+                of {len(playlist)}
             </div>
             """,
             unsafe_allow_html=True,
@@ -4975,13 +5251,15 @@ def render_standard_youtube_player(
             disabled=len(playlist) <= 1,
         ):
             next_video = playlist[
-                (current_index + 1) % len(playlist)
+                (current_index + 1)
+                % len(playlist)
             ]
             set_youtube_watcher_selection(
                 next_video,
                 source_name,
             )
             st.rerun()
+
 
 
 def render_youtube_video_grid(
@@ -4996,19 +5274,34 @@ def render_youtube_video_grid(
         len(videos),
         columns_per_row,
     ):
-        columns = st.columns(columns_per_row)
+        columns = st.columns(
+            columns_per_row
+        )
         row_videos = videos[
-            row_start:row_start + columns_per_row
+            row_start:
+            row_start + columns_per_row
         ]
 
-        for offset, (column, video) in enumerate(
-            zip(columns, row_videos)
+        for offset, (
+            column,
+            video,
+        ) in enumerate(
+            zip(
+                columns,
+                row_videos,
+            )
         ):
-            result_index = row_start + offset
+            result_index = (
+                row_start + offset
+            )
 
             with column:
-                with st.container(border=True):
-                    if video.get("thumbnail"):
+                with st.container(
+                    border=True
+                ):
+                    if video.get(
+                        "thumbnail"
+                    ):
                         st.image(
                             video["thumbnail"],
                             use_container_width=True,
@@ -5023,12 +5316,18 @@ def render_youtube_video_grid(
                     safe_channel = html.escape(
                         video["channel"]
                     )
-                    date_text = format_youtube_date(
-                        video["published_at"]
+                    date_text = (
+                        format_youtube_date(
+                            video[
+                                "published_at"
+                            ]
+                        )
                     )
-                    duration_text = video.get(
-                        "duration_text",
-                        "Duration unavailable",
+                    duration_text = (
+                        video.get(
+                            "duration_text",
+                            "Duration unavailable",
+                        )
                     )
                     type_text = video.get(
                         "video_type",
@@ -5037,27 +5336,36 @@ def render_youtube_video_grid(
 
                     st.markdown(
                         f"""
-                        <div class="youtube-result-title">
+                        <div class="
+                            youtube-result-title">
                             {safe_title}
                         </div>
-                        <div class="youtube-result-meta">
+                        <div class="
+                            youtube-result-meta">
                             {safe_channel}<br>
-                            {date_text} · {duration_text}
+                            {date_text} ·
+                            {duration_text}
                         </div>
-                        <span class="video-type-badge">
+                        <span class="
+                            video-type-badge">
                             {type_text}
                         </span>
                         """,
                         unsafe_allow_html=True,
                     )
 
-                    watch_col, open_col = st.columns(2)
+                    (
+                        watch_col,
+                        save_col,
+                        open_col,
+                    ) = st.columns(3)
 
                     with watch_col:
                         if st.button(
                             "▶ Watch",
                             key=(
-                                f"{key_prefix}_watch_"
+                                f"{key_prefix}"
+                                "_watch_"
                                 f"{video['video_id']}_"
                                 f"{result_index}"
                             ),
@@ -5065,8 +5373,9 @@ def render_youtube_video_grid(
                         ):
                             source_name = (
                                 short_source
-                                if video.get("video_type")
-                                == "Short"
+                                if video.get(
+                                    "video_type"
+                                ) == "Short"
                                 else normal_source
                             )
                             set_youtube_watcher_selection(
@@ -5075,12 +5384,24 @@ def render_youtube_video_grid(
                             )
                             st.rerun()
 
+                    with save_col:
+                        render_save_media_button(
+                            video,
+                            key=(
+                                f"{key_prefix}"
+                                "_save_"
+                                f"{video['video_id']}_"
+                                f"{result_index}"
+                            ),
+                        )
+
                     with open_col:
                         st.link_button(
                             "Open ↗",
                             video["url"],
                             use_container_width=True,
                         )
+
 
 
 def render_youtube_short_suggestions(
@@ -5094,18 +5415,37 @@ def render_youtube_short_suggestions(
         )
         return
 
-    for row_start in range(0, len(shorts), 4):
+    for row_start in range(
+        0,
+        len(shorts),
+        4,
+    ):
         columns = st.columns(4)
-        row_shorts = shorts[row_start:row_start + 4]
+        row_shorts = shorts[
+            row_start:
+            row_start + 4
+        ]
 
-        for offset, (column, video) in enumerate(
-            zip(columns, row_shorts)
+        for offset, (
+            column,
+            video,
+        ) in enumerate(
+            zip(
+                columns,
+                row_shorts,
+            )
         ):
-            result_index = row_start + offset
+            result_index = (
+                row_start + offset
+            )
 
             with column:
-                with st.container(border=True):
-                    if video.get("thumbnail"):
+                with st.container(
+                    border=True
+                ):
+                    if video.get(
+                        "thumbnail"
+                    ):
                         st.image(
                             video["thumbnail"],
                             use_container_width=True,
@@ -5113,34 +5453,67 @@ def render_youtube_short_suggestions(
 
                     st.markdown(
                         f"""
-                        <div class="youtube-result-title">
-                            {html.escape(shorten_text(video["title"], 72))}
+                        <div class="
+                            youtube-result-title">
+                            {html.escape(
+                                shorten_text(
+                                    video["title"],
+                                    72,
+                                )
+                            )}
                         </div>
-                        <div class="youtube-result-meta">
-                            {html.escape(video["channel"])}<br>
-                            {format_youtube_date(video["published_at"])}
+                        <div class="
+                            youtube-result-meta">
+                            {html.escape(
+                                video["channel"]
+                            )}<br>
+                            {format_youtube_date(
+                                video[
+                                    "published_at"
+                                ]
+                            )}
                         </div>
-                        <span class="video-type-badge">
+                        <span class="
+                            video-type-badge">
                             Short
                         </span>
                         """,
                         unsafe_allow_html=True,
                     )
 
-                    if st.button(
-                        "▶ Watch Short",
-                        key=(
-                            f"{key_prefix}_short_"
-                            f"{video['video_id']}_"
-                            f"{result_index}"
-                        ),
-                        use_container_width=True,
-                    ):
-                        set_youtube_watcher_selection(
+                    watch_col, save_col = (
+                        st.columns(2)
+                    )
+
+                    with watch_col:
+                        if st.button(
+                            "▶ Watch",
+                            key=(
+                                f"{key_prefix}"
+                                "_short_"
+                                f"{video['video_id']}_"
+                                f"{result_index}"
+                            ),
+                            use_container_width=True,
+                        ):
+                            set_youtube_watcher_selection(
+                                video,
+                                source_name,
+                            )
+                            st.rerun()
+
+                    with save_col:
+                        render_save_media_button(
                             video,
-                            source_name,
+                            key=(
+                                f"{key_prefix}"
+                                "_save_short_"
+                                f"{video['video_id']}_"
+                                f"{result_index}"
+                            ),
+                            category="Short",
                         )
-                        st.rerun()
+
 
 
 def initialize_music_state() -> None:
@@ -5521,7 +5894,7 @@ def render_persistent_music_overlay() -> None:
     url = st.session_state.persistent_music_url
     title = (
         st.session_state.persistent_music_title
-        or "StudyFlow Music"
+        or "StudyDragon Music"
     )
     loop_audio = bool(
         st.session_state.persistent_music_loop
@@ -5571,7 +5944,7 @@ def render_persistent_music_overlay() -> None:
                     );
                 }} catch (error) {{
                     console.warn(
-                        "StudyFlow could not remove "
+                        "StudyDragon could not remove "
                         + "the music player.",
                         error
                     );
@@ -6266,7 +6639,7 @@ def render_persistent_music_overlay() -> None:
                 }};
             }} catch (error) {{
                 console.warn(
-                    "StudyFlow could not create "
+                    "StudyDragon could not create "
                     + "the music player.",
                     error
                 );
@@ -6994,12 +7367,14 @@ def render_focus_music_search_player(
     st.markdown(
         f"""
         <div class="music-player-shell">
-            <div class="youtube-player-title">
+            <div class="
+                youtube-player-title">
                 {html.escape(
                     selected_video["title"]
                 )}
             </div>
-            <div class="youtube-player-meta">
+            <div class="
+                youtube-player-meta">
                 {html.escape(
                     selected_video["channel"]
                 )} ·
@@ -7021,6 +7396,26 @@ def render_focus_music_search_player(
     st.video(
         selected_video["url"]
     )
+
+    save_col, open_col = st.columns(2)
+
+    with save_col:
+        render_save_media_button(
+            selected_video,
+            key=(
+                "save_current_music_"
+                f"{selected_video['video_id']}"
+            ),
+            category="Music",
+            label="♡ Save music",
+        )
+
+    with open_col:
+        st.link_button(
+            "Open on YouTube ↗",
+            selected_video["url"],
+            use_container_width=True,
+        )
 
     previous_col, counter_col, next_col = (
         st.columns(
@@ -7071,26 +7466,48 @@ def render_focus_music_search_player(
 
 
 
+
 def render_focus_music_suggestions(
     videos: list[dict],
 ) -> None:
     if not videos:
         return
 
-    st.markdown("### Music suggestions")
+    st.markdown(
+        "### Music suggestions"
+    )
 
-    for row_start in range(0, len(videos), 3):
+    for row_start in range(
+        0,
+        len(videos),
+        3,
+    ):
         columns = st.columns(3)
-        row_videos = videos[row_start:row_start + 3]
+        row_videos = videos[
+            row_start:
+            row_start + 3
+        ]
 
-        for offset, (column, video) in enumerate(
-            zip(columns, row_videos)
+        for offset, (
+            column,
+            video,
+        ) in enumerate(
+            zip(
+                columns,
+                row_videos,
+            )
         ):
-            result_index = row_start + offset
+            result_index = (
+                row_start + offset
+            )
 
             with column:
-                with st.container(border=True):
-                    if video.get("thumbnail"):
+                with st.container(
+                    border=True
+                ):
+                    if video.get(
+                        "thumbnail"
+                    ):
                         st.image(
                             video["thumbnail"],
                             use_container_width=True,
@@ -7098,19 +7515,39 @@ def render_focus_music_suggestions(
 
                     st.markdown(
                         f"""
-                        <div class="youtube-result-title">
-                            {html.escape(shorten_text(video["title"], 84))}
+                        <div class="
+                            youtube-result-title">
+                            {html.escape(
+                                shorten_text(
+                                    video["title"],
+                                    84,
+                                )
+                            )}
                         </div>
-                        <div class="youtube-result-meta">
-                            {html.escape(video["channel"])}<br>
-                            {format_youtube_date(video["published_at"])}
-                            · {video.get("duration_text", "Duration unavailable")}
+                        <div class="
+                            youtube-result-meta">
+                            {html.escape(
+                                video["channel"]
+                            )}<br>
+                            {format_youtube_date(
+                                video[
+                                    "published_at"
+                                ]
+                            )}
+                            · {video.get(
+                                "duration_text",
+                                "Duration unavailable",
+                            )}
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
 
-                    play_col, open_col = st.columns(2)
+                    (
+                        play_col,
+                        save_col,
+                        open_col,
+                    ) = st.columns(3)
 
                     with play_col:
                         if st.button(
@@ -7122,10 +7559,21 @@ def render_focus_music_suggestions(
                             ),
                             use_container_width=True,
                         ):
-                            st.session_state.music_selected_index = (
-                                result_index
-                            )
+                            st.session_state[
+                                "music_selected_index"
+                            ] = result_index
                             st.rerun()
+
+                    with save_col:
+                        render_save_media_button(
+                            video,
+                            key=(
+                                "music_save_result_"
+                                f"{video['video_id']}_"
+                                f"{result_index}"
+                            ),
+                            category="Music",
+                        )
 
                     with open_col:
                         st.link_button(
@@ -7133,6 +7581,7 @@ def render_focus_music_suggestions(
                             video["url"],
                             use_container_width=True,
                         )
+
 
 def focus_music_page() -> None:
     initialize_music_state()
@@ -7154,7 +7603,7 @@ def focus_music_page() -> None:
                     </div>
                     <div class="music-subtitle">
                         One general option controls every
-                        music source in StudyFlow.
+                        music source in StudyDragon.
                     </div>
                 </div>
             </div>
@@ -7509,6 +7958,42 @@ def focus_music_page() -> None:
                         "loaded from this link."
                     )
 
+            saved_link_url = st.session_state[
+                "music_embed_url"
+            ]
+            pasted_saved = is_study_resource_saved(
+                saved_link_url
+            )
+
+            if st.button(
+                (
+                    "✓ Link saved"
+                    if pasted_saved
+                    else "♡ Save this music link"
+                ),
+                key="save_pasted_music_link",
+                use_container_width=True,
+                disabled=pasted_saved,
+            ):
+                success, message = add_study_resource(
+                    "Saved music link",
+                    saved_link_url,
+                    "Music",
+                    "Saved from Focus Music.",
+                )
+
+                st.toast(
+                    message,
+                    icon=(
+                        "✅"
+                        if success
+                        else "ℹ️"
+                    ),
+                )
+
+                if success:
+                    st.rerun()
+
     st.divider()
 
     upload_col, sounds_col = (
@@ -7582,6 +8067,7 @@ def focus_music_page() -> None:
 
 
 
+
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
@@ -7598,7 +8084,7 @@ def additional_resources_page() -> None:
         [
             "▶ YouTube Watcher",
             "🎵 Focus Music",
-            "🔖 My Resources",
+            "💾 Saved Media & Resources",
             "🧰 Study Tools",
         ]
     )
@@ -7634,7 +8120,7 @@ def additional_resources_page() -> None:
             key="youtube_persistence_choice",
             help=(
                 "The selected video or Short will use the same "
-                "floating player while you navigate StudyFlow."
+                "floating player while you navigate StudyDragon."
             ),
         )
 
@@ -7993,6 +8479,26 @@ def additional_resources_page() -> None:
                 start_index=start_index,
             )
 
+            short_save_col, short_open_col = st.columns(2)
+
+            with short_save_col:
+                render_save_media_button(
+                    selected_video,
+                    key=(
+                        "save_selected_short_"
+                        f"{selected_video['video_id']}"
+                    ),
+                    category="Short",
+                    label="♡ Save Short",
+                )
+
+            with short_open_col:
+                st.link_button(
+                    "Open on YouTube ↗",
+                    selected_video["url"],
+                    use_container_width=True,
+                )
+
             short_previous_col, short_counter_col, short_next_col = (
                 st.columns([1, 1.4, 1])
             )
@@ -8297,7 +8803,7 @@ def additional_resources_page() -> None:
             '<div class="section-eyebrow">Personal library</div>',
             unsafe_allow_html=True,
         )
-        st.markdown("### Save useful study resources")
+        st.markdown("### Saved media and study resources")
 
         with st.form(
             "add_study_resource_form",
@@ -8319,8 +8825,10 @@ def additional_resources_page() -> None:
                 resource_category = st.selectbox(
                     "Category",
                     [
-                        "Website",
+                        "Music",
                         "Video",
+                        "Short",
+                        "Website",
                         "Article",
                         "Practice",
                         "Reference",
@@ -8515,6 +9023,7 @@ def additional_resources_page() -> None:
 
 
 
+
 # ---------------------------------------------------------
 # MAIN APP
 # ---------------------------------------------------------
@@ -8528,10 +9037,21 @@ availability = get_availability()
 
 with st.sidebar:
     st.markdown(
-        """
+        f"""
         <div class="brand">
-            <div class="brand-title">🌿 StudyFlow</div>
-            <div class="brand-subtitle">Plan clearly. Focus calmly.</div>
+            <div class="brand-row">
+                <img
+                    class="brand-logo"
+                    src="{LOGO_DATA_URI}"
+                    alt="Half-cut dragonfruit logo"
+                >
+                <div class="brand-copy">
+                    <div class="brand-title">{APP_NAME}</div>
+                    <div class="brand-subtitle">
+                        {APP_TAGLINE}
+                    </div>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
