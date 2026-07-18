@@ -5065,8 +5065,14 @@ def persistent_music_embed_details(
 def render_persistent_music_overlay() -> None:
     initialize_music_state()
 
-    active = bool(
-        st.session_state.persistent_music_active
+    persistence_enabled = bool(
+        st.session_state.music_persistence_enabled
+    )
+    active = (
+        persistence_enabled
+        and bool(
+            st.session_state.persistent_music_active
+        )
     )
     url = st.session_state.persistent_music_url
     title = (
@@ -5521,86 +5527,6 @@ def render_persistent_music_overlay() -> None:
     )
 
 
-def render_persistent_music_dock() -> None:
-    initialize_music_state()
-
-    enabled = bool(
-        st.session_state[
-            "music_persistence_enabled"
-        ]
-    )
-    active = bool(
-        st.session_state[
-            "persistent_music_active"
-        ]
-    )
-    url = st.session_state[
-        "persistent_music_url"
-    ]
-    title = st.session_state[
-        "persistent_music_title"
-    ]
-
-    if not enabled and not url:
-        return
-
-    st.markdown(
-        '<div class="theme-label">'
-        "Music persistence"
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    if url:
-        st.markdown(
-            f"""
-            <div class="session-card">
-                <strong>
-                    ♫ {html.escape(
-                        shorten_text(
-                            title
-                            or "Selected music",
-                            45,
-                        )
-                    )}
-                </strong><br>
-                <span>
-                    {
-                        "Automatic mode is on"
-                        if enabled
-                        else "Automatic mode is off"
-                    }
-                </span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    if active:
-        if st.button(
-            "■ Stop floating player",
-            key="stop_global_music",
-            use_container_width=True,
-        ):
-            stop_persistent_music()
-            st.rerun()
-    elif enabled and url:
-        if st.button(
-            "▶ Resume selected music",
-            key="resume_global_music",
-            use_container_width=True,
-        ):
-            activate_persistent_music(
-                url,
-                title,
-                loop=bool(
-                    st.session_state[
-                        "persistent_music_loop"
-                    ]
-                ),
-                force_reload=True,
-            )
-            st.rerun()
 
 def normalize_music_url(url: str) -> str:
     clean_url = url.strip()
@@ -6339,14 +6265,6 @@ def render_focus_music_search_player(
         selected_video["url"]
     )
 
-    if st.session_state[
-        "music_persistence_enabled"
-    ]:
-        st.success(
-            "This selection is automatically "
-            "playing in the floating player."
-        )
-
     previous_col, counter_col, next_col = (
         st.columns(
             [1, 1.25, 1]
@@ -6489,7 +6407,7 @@ def focus_music_page() -> None:
     )
 
     persistence_choice = st.toggle(
-        "Keep all music playing while I navigate StudyFlow",
+        "Keep music playing across pages",
         value=bool(
             st.session_state[
                 "music_persistence_enabled"
@@ -6497,8 +6415,7 @@ def focus_music_page() -> None:
         ),
         key="all_music_persistence_choice",
         help=(
-            "Applies to searched music, pasted links, "
-            "uploaded audio, white noise, and brown noise."
+            "When enabled, all music sources use the floating player."
         ),
     )
 
@@ -6532,37 +6449,13 @@ def focus_music_page() -> None:
                 )
         else:
             stop_persistent_music()
+            st.session_state.persistent_music_active = False
 
         st.rerun()
-
-    if st.session_state[
-        "music_persistence_enabled"
-    ]:
-        st.success(
-            "Automatic music persistence is on. "
-            "Every new music source will use "
-            "the floating player."
-        )
-    else:
-        st.info(
-            "Turn on the option above to keep "
-            "all music playing across pages."
-        )
 
     youtube_api_key = (
         get_default_youtube_api_key()
     )
-
-    if youtube_api_key:
-        st.success(
-            "Music search is connected through YouTube."
-        )
-    else:
-        st.error(
-            "Music search is not connected. Add "
-            "YOUTUBE_API_KEY to Streamlit or "
-            "Codespaces secrets and restart the app."
-        )
 
     with st.form(
         "focus_music_search_form",
@@ -6855,14 +6748,6 @@ def focus_music_page() -> None:
                         "loaded from this link."
                     )
 
-            if st.session_state[
-                "music_persistence_enabled"
-            ]:
-                st.success(
-                    "This link is automatically loaded "
-                    "into the floating player."
-                )
-
     st.divider()
 
     upload_col, sounds_col = (
@@ -6917,15 +6802,6 @@ def focus_music_page() -> None:
                         audio_name,
                     )
 
-                if st.session_state[
-                    "music_persistence_enabled"
-                ]:
-                    st.success(
-                        "The uploaded audio is "
-                        "automatically in the "
-                        "floating player."
-                    )
-
             except ValueError as error:
                 st.warning(str(error))
 
@@ -6941,12 +6817,6 @@ def focus_music_page() -> None:
                 st.session_state.app_theme
             )
 
-    st.info(
-        "When the general option is enabled, "
-        "searched music, pasted links, uploaded audio, "
-        "white noise, and brown noise all use the "
-        "same floating player across StudyFlow."
-    )
 
 
 
@@ -6993,15 +6863,6 @@ def additional_resources_page() -> None:
             """,
             unsafe_allow_html=True,
         )
-
-        if youtube_api_key:
-            st.success("YouTube Watcher is connected.")
-        else:
-            st.error(
-                "YouTube Watcher is not connected. Add "
-                "YOUTUBE_API_KEY to Streamlit or Codespaces "
-                "secrets and restart the app."
-            )
 
         with st.container(border=True):
             with st.form(
@@ -7851,11 +7712,6 @@ with st.sidebar:
     ])
 
     today_minutes, _ = get_today_focus_stats()
-
-    render_persistent_music_dock()
-
-    if st.session_state.persistent_music_url:
-        st.divider()
 
     st.metric("Active tasks", active_count)
     st.metric("Urgent / overdue", urgent_count)
