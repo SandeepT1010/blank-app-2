@@ -627,6 +627,423 @@ def apply_app_theme(theme_name: str) -> None:
     </style>
     """
 
+
+    css += """
+    <style>
+        /*
+         * Full native-widget theme coverage.
+         * These selectors intentionally use !important because
+         * Streamlit and BaseWeb inject their own colors at runtime.
+         */
+        html,
+        body,
+        .stApp,
+        [data-testid="stAppViewContainer"] {
+            color-scheme: %%COLOR_SCHEME%%;
+        }
+
+        body,
+        button,
+        input,
+        textarea,
+        select {
+            color: var(--text);
+        }
+
+        /* Every bordered Streamlit container */
+        [data-testid="stVerticalBlockBorderWrapper"],
+        [data-testid="stHorizontalBlock"] > div:has(
+            > [data-testid="stVerticalBlockBorderWrapper"]
+        ) {
+            border-color: var(--border) !important;
+        }
+
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+        }
+
+        /* Expanders */
+        [data-testid="stExpander"],
+        [data-testid="stExpander"] details {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-color: var(--border) !important;
+        }
+
+        [data-testid="stExpander"] summary {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-radius: 12px !important;
+        }
+
+        [data-testid="stExpander"] summary:hover,
+        [data-testid="stExpander"] summary:focus-visible {
+            color: var(--text) !important;
+            background: var(--card-hover) !important;
+        }
+
+        [data-testid="stExpander"] summary p,
+        [data-testid="stExpander"] summary span,
+        [data-testid="stExpander"] summary svg {
+            color: var(--text) !important;
+            fill: currentColor !important;
+        }
+
+        [data-testid="stExpanderDetails"] {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-top: 1px solid var(--border) !important;
+        }
+
+        /* Tabs */
+        [data-testid="stTabs"] {
+            color: var(--text) !important;
+        }
+
+        [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            gap: 0.35rem;
+            color: var(--text) !important;
+            background: transparent !important;
+            border-bottom-color: var(--border) !important;
+        }
+
+        [data-testid="stTabs"] button[role="tab"] {
+            color: var(--text-soft) !important;
+            background: transparent !important;
+            border-radius: 10px 10px 0 0 !important;
+        }
+
+        [data-testid="stTabs"] button[role="tab"]:hover {
+            color: var(--text) !important;
+            background: var(--card-hover) !important;
+        }
+
+        [data-testid="stTabs"]
+        button[role="tab"][aria-selected="true"] {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+        }
+
+        [data-testid="stTabs"]
+        [data-baseweb="tab-highlight"] {
+            background-color: var(--accent) !important;
+        }
+
+        [data-testid="stTabs"]
+        [data-baseweb="tab-border"] {
+            background-color: var(--border) !important;
+        }
+
+        /* All standard buttons and link buttons */
+        button[data-testid^="stBaseButton"],
+        a[data-testid^="stBaseButton"],
+        [data-testid="stLinkButton"] a,
+        .stButton > button,
+        .stDownloadButton > button {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-color: var(--border-strong) !important;
+            box-shadow: none !important;
+        }
+
+        button[data-testid^="stBaseButton"] p,
+        a[data-testid^="stBaseButton"] p,
+        [data-testid="stLinkButton"] p,
+        .stButton > button p,
+        .stDownloadButton > button p {
+            color: inherit !important;
+        }
+
+        button[data-testid^="stBaseButton"]:hover,
+        a[data-testid^="stBaseButton"]:hover,
+        [data-testid="stLinkButton"] a:hover,
+        .stButton > button:hover,
+        .stDownloadButton > button:hover {
+            color: var(--text) !important;
+            background: var(--card-hover) !important;
+            border-color: var(--accent) !important;
+        }
+
+        button[data-testid="stBaseButton-primary"],
+        .stButton > button[kind="primary"] {
+            color: var(--accent-text) !important;
+            background: var(--accent) !important;
+            border-color: var(--accent) !important;
+        }
+
+        button[data-testid="stBaseButton-primary"] p,
+        .stButton > button[kind="primary"] p {
+            color: var(--accent-text) !important;
+        }
+
+        button[data-testid="stBaseButton-primary"]:hover,
+        .stButton > button[kind="primary"]:hover {
+            color: var(--accent-text) !important;
+            background: var(--accent-hover) !important;
+            border-color: var(--accent-hover) !important;
+        }
+
+        button:disabled,
+        button[disabled],
+        button[aria-disabled="true"],
+        a[aria-disabled="true"] {
+            color: var(--text-faint) !important;
+            background: var(--card-hover) !important;
+            border-color: var(--border) !important;
+            opacity: 0.62 !important;
+            cursor: not-allowed !important;
+        }
+
+        button:disabled p,
+        button[disabled] p,
+        button[aria-disabled="true"] p,
+        a[aria-disabled="true"] p {
+            color: var(--text-faint) !important;
+        }
+
+        /* Text, number, date, time, password, and text-area inputs */
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stDateInput"] input,
+        [data-testid="stTimeInput"] input,
+        [data-testid="stTextArea"] textarea,
+        [data-baseweb="base-input"],
+        [data-baseweb="input"],
+        [data-baseweb="textarea"],
+        [data-baseweb="select"] > div {
+            color: var(--text) !important;
+            background-color: var(--input) !important;
+            border-color: var(--border) !important;
+            caret-color: var(--accent) !important;
+        }
+
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stDateInput"] input,
+        [data-testid="stTimeInput"] input,
+        [data-testid="stTextArea"] textarea {
+            -webkit-text-fill-color: var(--text) !important;
+        }
+
+        [data-testid="stTextInput"] input::placeholder,
+        [data-testid="stTextArea"] textarea::placeholder,
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--text-faint) !important;
+            opacity: 1 !important;
+        }
+
+        [data-testid="stNumberInput"] button,
+        [data-testid="stDateInput"] button,
+        [data-testid="stTimeInput"] button,
+        [data-baseweb="select"] svg,
+        [data-baseweb="input"] svg {
+            color: var(--text) !important;
+            fill: currentColor !important;
+            background: transparent !important;
+        }
+
+        /* Select menus, date pickers, time menus, and popovers */
+        [data-baseweb="popover"],
+        [data-baseweb="menu"],
+        [data-baseweb="calendar"],
+        [data-baseweb="select"] ul,
+        [role="listbox"],
+        [role="menu"],
+        [role="dialog"] {
+            color: var(--text) !important;
+            background: var(--card) !important;
+            border-color: var(--border) !important;
+        }
+
+        [data-baseweb="popover"] *,
+        [data-baseweb="menu"] *,
+        [data-baseweb="calendar"] *,
+        [role="listbox"] *,
+        [role="menu"] * {
+            color: var(--text) !important;
+        }
+
+        [role="option"],
+        [role="menuitem"],
+        [data-baseweb="calendar"] button {
+            color: var(--text) !important;
+            background: var(--card) !important;
+        }
+
+        [role="option"]:hover,
+        [role="menuitem"]:hover,
+        [data-baseweb="calendar"] button:hover {
+            color: var(--text) !important;
+            background: var(--card-hover) !important;
+        }
+
+        [role="option"][aria-selected="true"],
+        [data-baseweb="calendar"]
+        button[aria-selected="true"] {
+            color: var(--accent-text) !important;
+            background: var(--accent) !important;
+        }
+
+        /* Checkbox, radio, toggle, and segmented controls */
+        [data-testid="stCheckbox"] label,
+        [data-testid="stRadio"] label,
+        [data-testid="stToggle"] label,
+        [data-testid="stSegmentedControl"] label {
+            color: var(--text) !important;
+        }
+
+        [data-testid="stCheckbox"] label p,
+        [data-testid="stRadio"] label p,
+        [data-testid="stToggle"] label p,
+        [data-testid="stSegmentedControl"] label p {
+            color: var(--text) !important;
+        }
+
+        [data-testid="stCheckbox"] svg,
+        [data-testid="stRadio"] svg,
+        [data-testid="stToggle"] svg {
+            color: var(--text) !important;
+            fill: currentColor !important;
+        }
+
+        [data-testid="stCheckbox"]
+        [aria-checked="true"],
+        [data-testid="stRadio"]
+        [aria-checked="true"],
+        [data-testid="stToggle"]
+        [aria-checked="true"] {
+            color: var(--accent-text) !important;
+            background-color: var(--accent) !important;
+            border-color: var(--accent) !important;
+        }
+
+        /* Sliders */
+        [data-testid="stSlider"] {
+            color: var(--text) !important;
+        }
+
+        [data-testid="stSlider"] [role="slider"] {
+            background: var(--accent) !important;
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 2px var(--card) !important;
+        }
+
+        [data-testid="stSlider"]
+        [data-baseweb="slider"] > div {
+            color: var(--text) !important;
+        }
+
+        /* File uploader */
+        [data-testid="stFileUploader"] {
+            color: var(--text) !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-color: var(--border) !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] * {
+            color: var(--text-soft) !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] button,
+        [data-testid="stFileUploaderDropzone"] button * {
+            color: var(--text) !important;
+            background: var(--card) !important;
+        }
+
+        [data-testid="stFileUploaderFile"] {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-color: var(--border) !important;
+        }
+
+        /* Forms */
+        [data-testid="stForm"] {
+            color: var(--text) !important;
+            background: var(--form) !important;
+            border-color: var(--border) !important;
+        }
+
+        /* Alerts, status boxes, toast messages, and exceptions */
+        [data-testid="stAlert"],
+        [data-testid="stStatusWidget"],
+        [data-testid="stToast"],
+        [data-testid="stException"] {
+            color: var(--text) !important;
+            background: var(--alert) !important;
+            border-color: var(--border) !important;
+        }
+
+        [data-testid="stAlert"] *,
+        [data-testid="stStatusWidget"] *,
+        [data-testid="stToast"] *,
+        [data-testid="stException"] * {
+            color: var(--text) !important;
+        }
+
+        /* Dataframes, tables, JSON, and code blocks */
+        [data-testid="stDataFrame"],
+        [data-testid="stTable"],
+        [data-testid="stJson"],
+        [data-testid="stCodeBlock"] {
+            color: var(--text) !important;
+            background: var(--table) !important;
+            border-color: var(--border) !important;
+        }
+
+        [data-testid="stTable"] table,
+        [data-testid="stTable"] th,
+        [data-testid="stTable"] td {
+            color: var(--text) !important;
+            background: var(--table) !important;
+            border-color: var(--border) !important;
+        }
+
+        [data-testid="stCodeBlock"] pre,
+        [data-testid="stCodeBlock"] code {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+        }
+
+        /* Tooltips and help icons */
+        [data-testid="stTooltipIcon"],
+        [data-testid="stTooltipIcon"] svg,
+        [data-baseweb="tooltip"] {
+            color: var(--text-soft) !important;
+            fill: currentColor !important;
+        }
+
+        /* Native audio/video shells */
+        [data-testid="stAudio"],
+        [data-testid="stVideo"] {
+            color: var(--text) !important;
+            background: var(--card-alt) !important;
+            border-radius: 14px;
+        }
+
+        /* Remove accidental white blocks around empty columns */
+        [data-testid="column"] {
+            color: var(--text);
+        }
+
+        /* Focus outlines follow the active theme */
+        button:focus-visible,
+        input:focus-visible,
+        textarea:focus-visible,
+        [role="option"]:focus-visible,
+        [role="tab"]:focus-visible {
+            outline: 2px solid var(--accent) !important;
+            outline-offset: 2px !important;
+            box-shadow: none !important;
+        }
+    </style>
+    """
+
     replacements = {
         "%%PAGE%%": palette["page"],
         "%%PAGE_END%%": palette["page_end"],
@@ -657,12 +1074,14 @@ def apply_app_theme(theme_name: str) -> None:
         "%%ALERT%%": palette["alert"],
         "%%PROGRESS_TRACK%%": palette["progress_track"],
         "%%TABLE%%": palette["table"],
+        "%%COLOR_SCHEME%%": theme_name.lower(),
     }
 
     for token, value in replacements.items():
         css = css.replace(token, value)
 
     st.markdown(css, unsafe_allow_html=True)
+
 
 
 apply_app_theme(st.session_state.app_theme)
@@ -4424,6 +4843,16 @@ def set_youtube_watcher_selection(
         source_name
     )
 
+    if st.session_state.get(
+        "youtube_persistence_enabled",
+        False,
+    ):
+        activate_persistent_music(
+            video["url"],
+            video["title"],
+        )
+
+
 
 def find_video_index(
     videos: list[dict],
@@ -4725,6 +5154,7 @@ def initialize_music_state() -> None:
         "music_search_error": "",
         "music_selected_index": 0,
         "music_persistence_enabled": False,
+        "youtube_persistence_enabled": False,
         "persistent_music_url": "",
         "persistent_music_title": "",
         "persistent_music_active": False,
@@ -4737,6 +5167,7 @@ def initialize_music_state() -> None:
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
 
 
 
@@ -5076,6 +5507,10 @@ def render_persistent_music_overlay() -> None:
 
     persistence_enabled = bool(
         st.session_state.music_persistence_enabled
+        or st.session_state.get(
+            "youtube_persistence_enabled",
+            False,
+        )
     )
     active = (
         persistence_enabled
@@ -5388,10 +5823,10 @@ def render_persistent_music_overlay() -> None:
                             z-index: 2147483000;
                             overflow: hidden;
                             border: 1px solid
-                                rgba(45,212,191,0.58);
+                                var(--border-strong);
                             border-radius: 18px;
-                            color: #f4fbfa;
-                            background: #0d2226;
+                            color: var(--text);
+                            background: var(--card-alt);
                             box-shadow:
                                 0 20px 60px
                                 rgba(0,0,0,0.48);
@@ -5419,8 +5854,8 @@ def render_persistent_music_overlay() -> None:
                             background:
                                 linear-gradient(
                                     135deg,
-                                    #0f766e,
-                                    #115e59
+                                    var(--accent),
+                                    var(--accent-hover)
                                 );
                         }}
 
@@ -5442,15 +5877,15 @@ def render_persistent_music_overlay() -> None:
                             height: 30px;
                             flex: 0 0 auto;
                             border-radius: 9px;
-                            color: #032421;
-                            background: #5eead4;
+                            color: var(--accent-text);
+                            background: var(--card);
                             font-weight: 900;
                         }}
 
                         #${{overlayId}}
                         .sf-music-title {{
                             overflow: hidden;
-                            color: #ffffff;
+                            color: var(--accent-text);
                             font-size: 14px;
                             text-overflow:
                                 ellipsis;
@@ -5475,7 +5910,7 @@ def render_persistent_music_overlay() -> None:
                             border: 1px solid
                                 rgba(255,255,255,0.38);
                             border-radius: 999px;
-                            color: #ffffff;
+                            color: var(--accent-text);
                             background:
                                 rgba(0,0,0,0.2);
                             font-size: 20px;
@@ -5492,16 +5927,14 @@ def render_persistent_music_overlay() -> None:
                         #${{overlayId}}
                         .sf-music-actions button:focus-visible {{
                             outline: none;
-                            background:
-                                rgba(255,255,255,0.2);
-                            border-color:
-                                rgba(255,255,255,0.7);
+                            background: var(--card-hover);
+                            border-color: var(--border-strong);
                         }}
 
                         #${{overlayId}}
                         .sf-music-body {{
                             padding: 11px;
-                            background: #0d2226;
+                            background: var(--card-alt);
                         }}
 
                         #${{overlayId}}.minimized {{
@@ -5847,6 +6280,7 @@ def render_persistent_music_overlay() -> None:
         height=0,
         scrolling=False,
     )
+
 
 
 
@@ -6771,8 +7205,12 @@ def focus_music_page() -> None:
                     force_reload=True,
                 )
         else:
-            stop_persistent_music()
-            st.session_state.persistent_music_active = False
+            if not st.session_state.get(
+                "youtube_persistence_enabled",
+                False,
+            ):
+                stop_persistent_music()
+                st.session_state.persistent_music_active = False
 
         st.rerun()
 
@@ -7143,6 +7581,7 @@ def focus_music_page() -> None:
 
 
 
+
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
@@ -7186,6 +7625,44 @@ def additional_resources_page() -> None:
             """,
             unsafe_allow_html=True,
         )
+
+        youtube_persistence_choice = st.toggle(
+            "Keep YouTube playing across pages",
+            value=bool(
+                st.session_state.youtube_persistence_enabled
+            ),
+            key="youtube_persistence_choice",
+            help=(
+                "The selected video or Short will use the same "
+                "floating player while you navigate StudyFlow."
+            ),
+        )
+
+        if (
+            youtube_persistence_choice
+            != st.session_state.youtube_persistence_enabled
+        ):
+            st.session_state.youtube_persistence_enabled = (
+                youtube_persistence_choice
+            )
+
+            current_youtube_video = st.session_state.get(
+                "youtube_watcher_selected"
+            )
+
+            if (
+                youtube_persistence_choice
+                and current_youtube_video
+            ):
+                activate_persistent_music(
+                    current_youtube_video["url"],
+                    current_youtube_video["title"],
+                    force_reload=True,
+                )
+            elif not st.session_state.music_persistence_enabled:
+                stop_persistent_music()
+
+            st.rerun()
 
         with st.container(border=True):
             with st.form(
@@ -7459,6 +7936,15 @@ def additional_resources_page() -> None:
             "Everything",
         )
 
+        if (
+            selected_video
+            and st.session_state.youtube_persistence_enabled
+        ):
+            activate_persistent_music(
+                selected_video["url"],
+                selected_video["title"],
+            )
+
         main_short_results = [
             video
             for video in videos
@@ -7506,6 +7992,65 @@ def additional_resources_page() -> None:
                 st.session_state.app_theme,
                 start_index=start_index,
             )
+
+            short_previous_col, short_counter_col, short_next_col = (
+                st.columns([1, 1.4, 1])
+            )
+
+            with short_previous_col:
+                if st.button(
+                    "← Previous Short",
+                    key=(
+                        "youtube_previous_short_"
+                        f"{selected_video['video_id']}"
+                    ),
+                    use_container_width=True,
+                    disabled=len(short_playlist) <= 1,
+                ):
+                    previous_short = short_playlist[
+                        (start_index - 1)
+                        % len(short_playlist)
+                    ]
+                    set_youtube_watcher_selection(
+                        previous_short,
+                        selected_source,
+                    )
+                    st.rerun()
+
+            with short_counter_col:
+                st.markdown(
+                    f"""
+                    <div style="
+                        text-align:center;
+                        color:var(--text-soft);
+                        padding:0.72rem 0;
+                        font-weight:700;">
+                        Short {start_index + 1}
+                        of {len(short_playlist)}
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+            with short_next_col:
+                if st.button(
+                    "Next Short →",
+                    key=(
+                        "youtube_next_short_"
+                        f"{selected_video['video_id']}"
+                    ),
+                    use_container_width=True,
+                    disabled=len(short_playlist) <= 1,
+                ):
+                    next_short = short_playlist[
+                        (start_index + 1)
+                        % len(short_playlist)
+                    ]
+                    set_youtube_watcher_selection(
+                        next_short,
+                        selected_source,
+                    )
+                    st.rerun()
 
         elif selected_video:
             standard_playlist = (
@@ -7966,6 +8511,8 @@ def additional_resources_page() -> None:
                         tool["url"],
                         use_container_width=True,
                     )
+
+
 
 
 # ---------------------------------------------------------
