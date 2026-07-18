@@ -1306,16 +1306,20 @@ def save_setting(key: str, value: str) -> None:
         )
 
 
-def record_focus_session(task_id: int, minutes: int) -> None:
-    task = get_task(task_id)
-    if task is None or minutes <= 0:
+def record_focus_session(task_id: int | None, minutes: int) -> None:
+    """
+    Save a completed focus session.
+
+    task_id 0 or None means the session is General Focus and is not
+    connected to a saved task. The session still counts toward today's
+    focus total and session history.
+    """
+
+    if minutes <= 0:
         return
 
-    new_studied_hours = min(
-        float(task["hours_needed"]),
-        float(task["studied_hours"]) + minutes / 60,
-    )
-    completed = int(new_studied_hours >= float(task["hours_needed"]))
+    linked_task_id = int(task_id or 0)
+    task = get_task(linked_task_id) if linked_task_id > 0 else None
 
     with connect() as connection:
         connection.execute(
@@ -1324,21 +1328,35 @@ def record_focus_session(task_id: int, minutes: int) -> None:
             VALUES (?, ?, ?)
             """,
             (
-                task_id,
+                linked_task_id,
                 int(minutes),
                 datetime.now().isoformat(timespec="seconds"),
             ),
         )
 
-        connection.execute(
-            """
-            UPDATE tasks
-            SET studied_hours = ?,
-                completed = ?
-            WHERE id = ?
-            """,
-            (new_studied_hours, completed, task_id),
-        )
+        if task is not None:
+            new_studied_hours = min(
+                float(task["hours_needed"]),
+                float(task["studied_hours"]) + minutes / 60,
+            )
+            completed = int(
+                new_studied_hours >= float(task["hours_needed"])
+            )
+
+            connection.execute(
+                """
+                UPDATE tasks
+                SET studied_hours = ?,
+                    completed = ?
+                WHERE id = ?
+                """,
+                (
+                    new_studied_hours,
+                    completed,
+                    linked_task_id,
+                ),
+            )
+
 
 
 def get_today_focus_stats() -> tuple[int, int]:
@@ -1364,6 +1382,7 @@ def get_recent_focus_sessions(limit: int = 6) -> list[dict]:
         rows = connection.execute(
             """
             SELECT
+                focus_sessions.task_id,
                 focus_sessions.minutes,
                 focus_sessions.completed_at,
                 tasks.subject,
@@ -1377,6 +1396,7 @@ def get_recent_focus_sessions(limit: int = 6) -> list[dict]:
         ).fetchall()
 
     return [dict(row) for row in rows]
+
 
 
 # ---------------------------------------------------------
@@ -1925,9 +1945,22 @@ def add_youtube_durations(
 def render_shorts_scroll_feed(
     videos: list[dict],
     theme_name: str,
+    start_index: int = 0,
 ) -> None:
+    """
+    Render a vertical Shorts viewer.
+
+    Users can scroll, use the up/down buttons, or use arrow keys.
+    start_index makes a clicked suggestion open at the chosen Short.
+    """
+
     if not videos:
         return
+
+    safe_start_index = max(
+        0,
+        min(int(start_index), len(videos) - 1),
+    )
 
     is_dark = theme_name == "Dark"
     background = "#071416" if is_dark else "#edf5f3"
@@ -1939,8 +1972,6 @@ def render_shorts_scroll_feed(
         if is_dark
         else "rgba(39,91,88,0.24)"
     )
-    button_background = "#0f766e"
-    button_text = "#ffffff"
 
     short_sections: list[str] = []
 
@@ -1954,7 +1985,8 @@ def render_shorts_scroll_feed(
 
         short_sections.append(
             f"""
-            <section class="short-card" data-short-index="{index}">
+            <section class="short-card"
+                     data-short-index="{index}">
                 <div class="phone-frame">
                     <iframe
                         class="short-player"
@@ -1967,7 +1999,9 @@ def render_shorts_scroll_feed(
                 </div>
                 <div class="short-info">
                     <div class="short-title">{title}</div>
-                    <div class="short-meta">{channel} · {date_text}</div>
+                    <div class="short-meta">
+                        {channel} · {date_text}
+                    </div>
                 </div>
             </section>
             """
@@ -1985,7 +2019,6 @@ def render_shorts_scroll_feed(
 
             body {{
                 margin: 0;
-                padding: 0;
                 color: {text};
                 background: {background};
                 font-family: Arial, Helvetica, sans-serif;
@@ -2062,8 +2095,8 @@ def render_shorts_scroll_feed(
                 height: 3rem;
                 border: 0;
                 border-radius: 999px;
-                color: {button_text};
-                background: {button_background};
+                color: #ffffff;
+                background: #0f766e;
                 font-size: 1.15rem;
                 font-weight: 800;
                 cursor: pointer;
@@ -2072,6 +2105,7 @@ def render_shorts_scroll_feed(
 
             .nav-button:hover {{
                 transform: scale(1.04);
+                background: #14b8a6;
             }}
 
             .previous {{
@@ -2108,13 +2142,18 @@ def render_shorts_scroll_feed(
     </head>
     <body>
         <div class="watcher">
-            <div class="counter" id="shortCounter">1 / {len(videos)}</div>
+            <div class="counter" id="shortCounter">
+                {safe_start_index + 1} / {len(videos)}
+            </div>
+
             <div class="shorts-feed" id="shortsFeed">
                 {''.join(short_sections)}
             </div>
+
             <button class="nav-button previous"
                     onclick="moveShort(-1)"
                     aria-label="Previous Short">↑</button>
+
             <button class="nav-button next"
                     onclick="moveShort(1)"
                     aria-label="Next Short">↓</button>
@@ -2125,13 +2164,17 @@ def render_shorts_scroll_feed(
             const cards = Array.from(
                 feed.querySelectorAll(".short-card")
             );
-            const counter = document.getElementById("shortCounter");
-            let currentIndex = 0;
+            const counter = document.getElementById(
+                "shortCounter"
+            );
+            let currentIndex = {safe_start_index};
 
             function pauseAllExcept(activeIndex) {{
                 cards.forEach((card, index) => {{
                     if (index === activeIndex) return;
+
                     const player = card.querySelector("iframe");
+
                     if (player && player.contentWindow) {{
                         player.contentWindow.postMessage(
                             JSON.stringify({{
@@ -2155,31 +2198,46 @@ def render_shorts_scroll_feed(
                 pauseAllExcept(currentIndex);
             }}
 
-            function moveShort(direction) {{
+            function showShort(index, behavior = "smooth") {{
                 const targetIndex = Math.max(
                     0,
-                    Math.min(
-                        cards.length - 1,
-                        currentIndex + direction
-                    )
+                    Math.min(cards.length - 1, index)
                 );
 
                 cards[targetIndex].scrollIntoView({{
-                    behavior: "smooth",
+                    behavior: behavior,
                     block: "start"
                 }});
                 updateCounter(targetIndex);
             }}
 
+            function moveShort(direction) {{
+                let targetIndex =
+                    currentIndex + direction;
+
+                if (targetIndex < 0) {{
+                    targetIndex = cards.length - 1;
+                }}
+
+                if (targetIndex >= cards.length) {{
+                    targetIndex = 0;
+                }}
+
+                showShort(targetIndex);
+            }}
+
             const observer = new IntersectionObserver(
                 entries => {{
                     entries.forEach(entry => {{
-                        if (entry.isIntersecting
-                            && entry.intersectionRatio >= 0.65) {{
-                            const index = Number(
-                                entry.target.dataset.shortIndex
+                        if (
+                            entry.isIntersecting
+                            && entry.intersectionRatio >= 0.65
+                        ) {{
+                            updateCounter(
+                                Number(
+                                    entry.target.dataset.shortIndex
+                                )
                             );
-                            updateCounter(index);
                         }}
                     }});
                 }},
@@ -2189,14 +2247,36 @@ def render_shorts_scroll_feed(
                 }}
             );
 
-            cards.forEach(card => observer.observe(card));
+            cards.forEach(
+                card => observer.observe(card)
+            );
 
-            feed.addEventListener("keydown", event => {{
-                if (event.key === "ArrowDown") moveShort(1);
-                if (event.key === "ArrowUp") moveShort(-1);
-            }});
+            feed.addEventListener(
+                "keydown",
+                event => {{
+                    if (event.key === "ArrowDown") {{
+                        event.preventDefault();
+                        moveShort(1);
+                    }}
+
+                    if (event.key === "ArrowUp") {{
+                        event.preventDefault();
+                        moveShort(-1);
+                    }}
+                }}
+            );
 
             feed.tabIndex = 0;
+
+            window.addEventListener(
+                "load",
+                () => {{
+                    showShort(
+                        {safe_start_index},
+                        "auto"
+                    );
+                }}
+            );
         </script>
     </body>
     </html>
@@ -2207,6 +2287,7 @@ def render_shorts_scroll_feed(
         height=760,
         scrolling=False,
     )
+
 
 def search_youtube_watcher(
     query: str,
@@ -2607,6 +2688,7 @@ def initialize_timer_state() -> None:
 
 
 @st.fragment(run_every="1s")
+@st.fragment(run_every="1s")
 def render_live_timer() -> None:
     if st.session_state.timer_running:
         remaining_seconds = max(
@@ -2626,12 +2708,9 @@ def render_live_timer() -> None:
 
     if remaining_seconds <= 0 and st.session_state.timer_running:
         if st.session_state.timer_phase == "Focus":
-            if (
-                not st.session_state.timer_logged
-                and st.session_state.timer_task_id is not None
-            ):
+            if not st.session_state.timer_logged:
                 record_focus_session(
-                    int(st.session_state.timer_task_id),
+                    st.session_state.timer_task_id,
                     int(st.session_state.timer_focus_minutes),
                 )
                 st.session_state.timer_logged = True
@@ -2676,9 +2755,10 @@ def render_live_timer() -> None:
     progress = min(1.0, max(0.0, progress))
 
     minutes, seconds = divmod(remaining_seconds, 60)
+    timer_task_id = int(st.session_state.timer_task_id or 0)
     selected_task = (
-        get_task(int(st.session_state.timer_task_id))
-        if st.session_state.timer_task_id is not None
+        get_task(timer_task_id)
+        if timer_task_id > 0
         else None
     )
 
@@ -2698,8 +2778,10 @@ def render_live_timer() -> None:
                 f"{html.escape(selected_task['subject'])}: "
                 f"{html.escape(selected_task['task_name'])}"
             )
+        elif timer_task_id == 0:
+            task_text = "General Focus"
         else:
-            task_text = "Choose a task to begin"
+            task_text = "Choose a focus option"
 
         status_text = (
             "Focus session in progress"
@@ -2724,13 +2806,15 @@ def render_live_timer() -> None:
         and st.session_state.timer_phase == "Break"
     ):
         st.success(
-            "Focus session completed and saved. Your break started automatically."
+            "Focus session completed and saved. "
+            "Your break started automatically."
         )
 
     if st.session_state.timer_break_complete_notice:
         st.success(
             "Break complete. The next focus session is ready."
         )
+
 
 
 
@@ -3071,31 +3155,55 @@ def focus_timer_page(tasks: list[dict]) -> None:
 
     st.subheader("Pomodoro Focus Timer")
     st.caption(
-        "Choose a preset or enter your own focus time. "
-        "After each completed focus session, a 5, 10, or 15-minute break starts automatically."
+        "Use General Focus without creating a task, or connect the timer "
+        "to a saved task so completed focus time updates its progress."
     )
 
     active_tasks = [
-        task for task in tasks
-        if not task["completed"] and remaining_task_hours(task) > 0
+        task
+        for task in tasks
+        if not task["completed"]
+        and remaining_task_hours(task) > 0
     ]
 
-    if not active_tasks:
-        st.info("Add or reopen a task before starting the timer.")
-        return
-
-    task_options = {
-        f"{task['subject']}: {task['task_name']} "
-        f"({remaining_task_hours(task):.1f} hr left)": task["id"]
-        for task in active_tasks
+    task_options: dict[str, int] = {
+        "General Focus — not linked to a task": 0,
     }
+
+    task_options.update(
+        {
+            (
+                f"{task['subject']}: {task['task_name']} "
+                f"({remaining_task_hours(task):.1f} hr left)"
+            ): task["id"]
+            for task in active_tasks
+        }
+    )
+
+    if not active_tasks:
+        st.info(
+            "You have no active tasks yet. You can still use "
+            "General Focus and save the session to your focus history."
+        )
 
     task_col, mode_col = st.columns([1.4, 1])
 
     with task_col:
+        saved_task_id = int(
+            st.session_state.timer_task_id or 0
+        )
+        task_labels = list(task_options.keys())
+        default_task_index = 0
+
+        for index, label in enumerate(task_labels):
+            if task_options[label] == saved_task_id:
+                default_task_index = index
+                break
+
         selected_label = st.selectbox(
             "Focus task",
-            list(task_options.keys()),
+            task_labels,
+            index=default_task_index,
             disabled=st.session_state.timer_running,
         )
         selected_task_id = task_options[selected_label]
@@ -3112,10 +3220,18 @@ def focus_timer_page(tasks: list[dict]) -> None:
 
     with duration_col:
         if duration_mode == "Preset":
+            preset_options = [15, 25, 45, 60]
+            saved_duration = int(
+                st.session_state.timer_focus_minutes
+            )
             selected_duration = st.selectbox(
                 "Session length",
-                [15, 25, 45, 60],
-                index=1,
+                preset_options,
+                index=(
+                    preset_options.index(saved_duration)
+                    if saved_duration in preset_options
+                    else 1
+                ),
                 format_func=lambda value: f"{value} minutes",
                 disabled=st.session_state.timer_running,
             )
@@ -3125,20 +3241,26 @@ def focus_timer_page(tasks: list[dict]) -> None:
                     "Custom focus time (minutes)",
                     min_value=1,
                     max_value=240,
-                    value=int(st.session_state.timer_focus_minutes),
+                    value=int(
+                        st.session_state.timer_focus_minutes
+                    ),
                     step=1,
                     disabled=st.session_state.timer_running,
                 )
             )
 
     with break_col:
+        break_options = [5, 10, 15]
+        saved_break = int(
+            st.session_state.timer_break_minutes
+        )
         selected_break = st.selectbox(
             "Break duration",
-            [5, 10, 15],
-            index=[5, 10, 15].index(
-                int(st.session_state.timer_break_minutes)
-                if int(st.session_state.timer_break_minutes) in [5, 10, 15]
-                else 5
+            break_options,
+            index=(
+                break_options.index(saved_break)
+                if saved_break in break_options
+                else 0
             ),
             format_func=lambda value: f"{value} minutes",
             disabled=st.session_state.timer_running,
@@ -3159,7 +3281,9 @@ def focus_timer_page(tasks: list[dict]) -> None:
         st.session_state.timer_focus_minutes = selected_duration
         st.session_state.timer_break_minutes = selected_break
         st.session_state.timer_phase = "Focus"
-        st.session_state.timer_remaining_seconds = selected_duration * 60
+        st.session_state.timer_remaining_seconds = (
+            selected_duration * 60
+        )
         st.session_state.timer_logged = False
         st.session_state.timer_complete_notice = False
         st.session_state.timer_break_complete_notice = False
@@ -3236,7 +3360,9 @@ def focus_timer_page(tasks: list[dict]) -> None:
         ):
             st.session_state.timer_running = False
             st.session_state.timer_phase = "Focus"
-            st.session_state.timer_remaining_seconds = selected_duration * 60
+            st.session_state.timer_remaining_seconds = (
+                selected_duration * 60
+            )
             st.session_state.timer_focus_minutes = selected_duration
             st.session_state.timer_break_minutes = selected_break
             st.session_state.timer_task_id = selected_task_id
@@ -3253,7 +3379,9 @@ def focus_timer_page(tasks: list[dict]) -> None:
         ):
             st.session_state.timer_running = False
             st.session_state.timer_phase = "Focus"
-            st.session_state.timer_remaining_seconds = selected_duration * 60
+            st.session_state.timer_remaining_seconds = (
+                selected_duration * 60
+            )
             st.session_state.timer_logged = False
             st.session_state.timer_complete_notice = False
             st.session_state.timer_break_complete_notice = True
@@ -3264,7 +3392,9 @@ def focus_timer_page(tasks: list[dict]) -> None:
     st.divider()
 
     today_minutes, today_sessions = get_today_focus_stats()
-    daily_goal = int(get_setting("daily_focus_goal", "60"))
+    daily_goal = int(
+        get_setting("daily_focus_goal", "60")
+    )
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Focused today", f"{today_minutes} min")
@@ -3277,14 +3407,19 @@ def focus_timer_page(tasks: list[dict]) -> None:
     new_goal = st.select_slider(
         "Daily focus goal",
         options=[30, 45, 60, 90, 120, 180],
-        value=daily_goal
-        if daily_goal in [30, 45, 60, 90, 120, 180]
-        else 60,
+        value=(
+            daily_goal
+            if daily_goal in [30, 45, 60, 90, 120, 180]
+            else 60
+        ),
         format_func=lambda value: f"{value} minutes",
     )
 
     if new_goal != daily_goal:
-        save_setting("daily_focus_goal", str(new_goal))
+        save_setting(
+            "daily_focus_goal",
+            str(new_goal),
+        )
         st.rerun()
 
     recent_sessions = get_recent_focus_sessions()
@@ -3296,20 +3431,30 @@ def focus_timer_page(tasks: list[dict]) -> None:
             completed_at = datetime.fromisoformat(
                 session["completed_at"]
             ).strftime("%b %d · %I:%M %p")
-            subject = html.escape(session["subject"] or "Deleted task")
-            task_name = html.escape(session["task_name"] or "Task removed")
+
+            if int(session["task_id"] or 0) == 0:
+                subject = "General Focus"
+                task_name = "Unassigned session"
+            elif session["subject"] and session["task_name"]:
+                subject = html.escape(session["subject"])
+                task_name = html.escape(session["task_name"])
+            else:
+                subject = "Deleted task"
+                task_name = "Saved focus session"
 
             st.markdown(
                 f"""
                 <div class="session-card">
                     <strong>{subject}: {task_name}</strong><br>
                     <span style="color:var(--text-soft);">
-                        {session["minutes"]} focus minutes · {completed_at}
+                        {session["minutes"]} focus minutes ·
+                        {completed_at}
                     </span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+
 
 
 
@@ -3537,6 +3682,304 @@ def study_plan_page(
 
 
 
+def set_youtube_watcher_selection(
+    video: dict,
+    source_name: str,
+) -> None:
+    st.session_state.youtube_watcher_selected = video
+    st.session_state.youtube_watcher_selected_source = (
+        source_name
+    )
+
+
+def find_video_index(
+    videos: list[dict],
+    selected_video: dict | None,
+) -> int:
+    if not videos or not selected_video:
+        return 0
+
+    selected_id = selected_video.get("video_id")
+
+    for index, video in enumerate(videos):
+        if video.get("video_id") == selected_id:
+            return index
+
+    return 0
+
+
+def unique_youtube_videos(
+    videos: list[dict],
+) -> list[dict]:
+    unique: list[dict] = []
+    seen_ids: set[str] = set()
+
+    for video in videos:
+        video_id = video.get("video_id", "")
+
+        if not video_id or video_id in seen_ids:
+            continue
+
+        seen_ids.add(video_id)
+        unique.append(video)
+
+    return unique
+
+
+def render_standard_youtube_player(
+    selected_video: dict,
+    playlist: list[dict],
+    source_name: str,
+) -> None:
+    current_index = find_video_index(
+        playlist,
+        selected_video,
+    )
+    safe_title = html.escape(
+        selected_video["title"]
+    )
+    safe_channel = html.escape(
+        selected_video["channel"]
+    )
+    duration_text = selected_video.get(
+        "duration_text",
+        "Duration unavailable",
+    )
+
+    st.markdown(
+        f"""
+        <div class="youtube-player-box">
+            <div class="youtube-player-title">
+                {safe_title}
+            </div>
+            <div class="youtube-player-meta">
+                {safe_channel} ·
+                {format_youtube_date(selected_video["published_at"])}
+                · {duration_text}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.video(selected_video["url"])
+
+    previous_col, counter_col, next_col = st.columns(
+        [1, 1.4, 1]
+    )
+
+    with previous_col:
+        if st.button(
+            "← Previous video",
+            key=(
+                "youtube_previous_"
+                f"{source_name}_"
+                f"{selected_video['video_id']}"
+            ),
+            use_container_width=True,
+            disabled=len(playlist) <= 1,
+        ):
+            previous_video = playlist[
+                (current_index - 1) % len(playlist)
+            ]
+            set_youtube_watcher_selection(
+                previous_video,
+                source_name,
+            )
+            st.rerun()
+
+    with counter_col:
+        st.markdown(
+            f"""
+            <div style="
+                text-align:center;
+                color:var(--text-soft);
+                padding:0.72rem 0;
+                font-weight:700;">
+                Video {current_index + 1} of {len(playlist)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    with next_col:
+        if st.button(
+            "Next video →",
+            key=(
+                "youtube_next_"
+                f"{source_name}_"
+                f"{selected_video['video_id']}"
+            ),
+            use_container_width=True,
+            disabled=len(playlist) <= 1,
+        ):
+            next_video = playlist[
+                (current_index + 1) % len(playlist)
+            ]
+            set_youtube_watcher_selection(
+                next_video,
+                source_name,
+            )
+            st.rerun()
+
+
+def render_youtube_video_grid(
+    videos: list[dict],
+    key_prefix: str,
+    normal_source: str,
+    short_source: str,
+    columns_per_row: int = 3,
+) -> None:
+    for row_start in range(
+        0,
+        len(videos),
+        columns_per_row,
+    ):
+        columns = st.columns(columns_per_row)
+        row_videos = videos[
+            row_start:row_start + columns_per_row
+        ]
+
+        for offset, (column, video) in enumerate(
+            zip(columns, row_videos)
+        ):
+            result_index = row_start + offset
+
+            with column:
+                with st.container(border=True):
+                    if video.get("thumbnail"):
+                        st.image(
+                            video["thumbnail"],
+                            use_container_width=True,
+                        )
+
+                    safe_title = html.escape(
+                        shorten_text(
+                            video["title"],
+                            92,
+                        )
+                    )
+                    safe_channel = html.escape(
+                        video["channel"]
+                    )
+                    date_text = format_youtube_date(
+                        video["published_at"]
+                    )
+                    duration_text = video.get(
+                        "duration_text",
+                        "Duration unavailable",
+                    )
+                    type_text = video.get(
+                        "video_type",
+                        "Video",
+                    )
+
+                    st.markdown(
+                        f"""
+                        <div class="youtube-result-title">
+                            {safe_title}
+                        </div>
+                        <div class="youtube-result-meta">
+                            {safe_channel}<br>
+                            {date_text} · {duration_text}
+                        </div>
+                        <span class="video-type-badge">
+                            {type_text}
+                        </span>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    watch_col, open_col = st.columns(2)
+
+                    with watch_col:
+                        if st.button(
+                            "▶ Watch",
+                            key=(
+                                f"{key_prefix}_watch_"
+                                f"{video['video_id']}_"
+                                f"{result_index}"
+                            ),
+                            use_container_width=True,
+                        ):
+                            source_name = (
+                                short_source
+                                if video.get("video_type")
+                                == "Short"
+                                else normal_source
+                            )
+                            set_youtube_watcher_selection(
+                                video,
+                                source_name,
+                            )
+                            st.rerun()
+
+                    with open_col:
+                        st.link_button(
+                            "Open ↗",
+                            video["url"],
+                            use_container_width=True,
+                        )
+
+
+def render_youtube_short_suggestions(
+    shorts: list[dict],
+    key_prefix: str,
+    source_name: str,
+) -> None:
+    if not shorts:
+        st.info(
+            "No Shorts were found for this search."
+        )
+        return
+
+    for row_start in range(0, len(shorts), 4):
+        columns = st.columns(4)
+        row_shorts = shorts[row_start:row_start + 4]
+
+        for offset, (column, video) in enumerate(
+            zip(columns, row_shorts)
+        ):
+            result_index = row_start + offset
+
+            with column:
+                with st.container(border=True):
+                    if video.get("thumbnail"):
+                        st.image(
+                            video["thumbnail"],
+                            use_container_width=True,
+                        )
+
+                    st.markdown(
+                        f"""
+                        <div class="youtube-result-title">
+                            {html.escape(shorten_text(video["title"], 72))}
+                        </div>
+                        <div class="youtube-result-meta">
+                            {html.escape(video["channel"])}<br>
+                            {format_youtube_date(video["published_at"])}
+                        </div>
+                        <span class="video-type-badge">
+                            Short
+                        </span>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    if st.button(
+                        "▶ Watch Short",
+                        key=(
+                            f"{key_prefix}_short_"
+                            f"{video['video_id']}_"
+                            f"{result_index}"
+                        ),
+                        use_container_width=True,
+                    ):
+                        set_youtube_watcher_selection(
+                            video,
+                            source_name,
+                        )
+                        st.rerun()
+
 def additional_resources_page() -> None:
     st.subheader("Additional Resources")
     st.caption(
@@ -3561,9 +4004,12 @@ def additional_resources_page() -> None:
                 <div class="youtube-brand-row">
                     <div class="youtube-play-mark">▶</div>
                     <div>
-                        <div class="youtube-watcher-title">YouTube Watcher</div>
+                        <div class="youtube-watcher-title">
+                            YouTube Watcher
+                        </div>
                         <div class="youtube-watcher-subtitle">
-                            Search a topic or channel and watch videos without leaving StudyFlow.
+                            Search a topic or channel, watch a result,
+                            and move through related suggestions.
                         </div>
                     </div>
                 </div>
@@ -3576,8 +4022,9 @@ def additional_resources_page() -> None:
             st.success("YouTube Watcher is connected.")
         else:
             st.error(
-                "YouTube Watcher is not connected. Add YOUTUBE_API_KEY "
-                "to your Streamlit or Codespaces secrets and restart the app."
+                "YouTube Watcher is not connected. Add "
+                "YOUTUBE_API_KEY to Streamlit or Codespaces "
+                "secrets and restart the app."
             )
 
         with st.container(border=True):
@@ -3592,14 +4039,18 @@ def additional_resources_page() -> None:
                         "youtube_watcher_query",
                         "",
                     ),
-                    placeholder="Search a topic, lesson, creator, or @channel...",
+                    placeholder=(
+                        "Search a topic, lesson, creator, "
+                        "or @channel..."
+                    ),
                     label_visibility="collapsed",
                 )
 
                 st.markdown(
                     '<div class="youtube-search-help">'
-                    'Examples: “calculus limits,” “Python recursion,” '
-                    '“Khan Academy,” or “@3blue1brown”'
+                    'Examples: “calculus limits,” '
+                    '“Python recursion,” “Khan Academy,” '
+                    'or “@3blue1brown”'
                     "</div>",
                     unsafe_allow_html=True,
                 )
@@ -3609,7 +4060,9 @@ def additional_resources_page() -> None:
                     type_col,
                     order_col,
                     button_col,
-                ) = st.columns([1.15, 1.15, 1.15, 0.85])
+                ) = st.columns(
+                    [1.15, 1.15, 1.15, 0.85]
+                )
 
                 with mode_col:
                     search_mode = st.radio(
@@ -3631,16 +4084,19 @@ def additional_resources_page() -> None:
                         "Videos",
                         "Shorts",
                     ]
-                    saved_video_type = st.session_state.get(
-                        "youtube_watcher_video_type",
-                        "Everything",
+                    saved_video_type = (
+                        st.session_state.get(
+                            "youtube_watcher_video_type",
+                            "Everything",
+                        )
                     )
                     video_type = st.selectbox(
                         "Type",
                         video_type_options,
                         index=video_type_options.index(
                             saved_video_type
-                            if saved_video_type in video_type_options
+                            if saved_video_type
+                            in video_type_options
                             else "Everything"
                         ),
                     )
@@ -3667,10 +4123,12 @@ def additional_resources_page() -> None:
 
                 with button_col:
                     st.write("")
-                    search_submitted = st.form_submit_button(
-                        "🔍 Search",
-                        type="primary",
-                        use_container_width=True,
+                    search_submitted = (
+                        st.form_submit_button(
+                            "🔍 Search",
+                            type="primary",
+                            use_container_width=True,
+                        )
                     )
 
         if search_submitted:
@@ -3684,7 +4142,9 @@ def additional_resources_page() -> None:
                 )
             else:
                 try:
-                    with st.spinner("Searching YouTube..."):
+                    with st.spinner(
+                        "Searching YouTube..."
+                    ):
                         (
                             videos,
                             next_page_token,
@@ -3699,6 +4159,40 @@ def additional_resources_page() -> None:
                             max_results=12,
                         )
 
+                        extra_shorts: list[dict] = []
+                        extra_shorts_next_token = ""
+
+                        if video_type == "Everything":
+                            (
+                                extra_shorts,
+                                extra_shorts_next_token,
+                                _,
+                                _,
+                            ) = search_youtube_watcher(
+                                search_query,
+                                youtube_api_key,
+                                search_mode,
+                                sort_order,
+                                "Shorts",
+                                max_results=6,
+                            )
+
+                            main_ids = {
+                                video["video_id"]
+                                for video in videos
+                            }
+                            extra_shorts = [
+                                video
+                                for video in extra_shorts
+                                if video["video_id"]
+                                not in main_ids
+                            ][:4]
+
+                    videos = unique_youtube_videos(videos)
+                    extra_shorts = unique_youtube_videos(
+                        extra_shorts
+                    )
+
                     st.session_state.youtube_watcher_query = (
                         search_query.strip()
                     )
@@ -3711,7 +4205,9 @@ def additional_resources_page() -> None:
                     st.session_state.youtube_watcher_video_type = (
                         video_type
                     )
-                    st.session_state.youtube_watcher_results = videos
+                    st.session_state.youtube_watcher_results = (
+                        videos
+                    )
                     st.session_state.youtube_watcher_next_token = (
                         next_page_token
                     )
@@ -3721,16 +4217,59 @@ def additional_resources_page() -> None:
                     st.session_state.youtube_watcher_label = (
                         resolved_label
                     )
-                    st.session_state.youtube_watcher_selected = (
-                        videos[0]
-                        if videos and video_type != "Shorts"
-                        else None
+                    st.session_state.youtube_watcher_extra_shorts = (
+                        extra_shorts
                     )
+                    st.session_state.youtube_watcher_extra_shorts_next = (
+                        extra_shorts_next_token
+                    )
+
+                    first_video = (
+                        videos[0]
+                        if videos
+                        else (
+                            extra_shorts[0]
+                            if extra_shorts
+                            else None
+                        )
+                    )
+
+                    if first_video:
+                        first_source = (
+                            "main_shorts"
+                            if first_video.get(
+                                "video_type"
+                            ) == "Short"
+                            else "main"
+                        )
+
+                        if (
+                            not videos
+                            and extra_shorts
+                        ):
+                            first_source = "extra_shorts"
+
+                        set_youtube_watcher_selection(
+                            first_video,
+                            first_source,
+                        )
+                    else:
+                        st.session_state.youtube_watcher_selected = (
+                            None
+                        )
+                        st.session_state.youtube_watcher_selected_source = (
+                            "main"
+                        )
+
                     st.session_state.youtube_watcher_error = ""
+
                 except RuntimeError as error:
                     st.session_state.youtube_watcher_results = []
+                    st.session_state.youtube_watcher_extra_shorts = []
                     st.session_state.youtube_watcher_next_token = ""
-                    st.session_state.youtube_watcher_error = str(error)
+                    st.session_state.youtube_watcher_error = (
+                        str(error)
+                    )
 
         watcher_error = st.session_state.get(
             "youtube_watcher_error",
@@ -3744,45 +4283,84 @@ def additional_resources_page() -> None:
             "youtube_watcher_results",
             [],
         )
+        extra_shorts = st.session_state.get(
+            "youtube_watcher_extra_shorts",
+            [],
+        )
         selected_video = st.session_state.get(
             "youtube_watcher_selected"
         )
-
+        selected_source = st.session_state.get(
+            "youtube_watcher_selected_source",
+            "main",
+        )
         selected_video_type = st.session_state.get(
             "youtube_watcher_video_type",
             "Everything",
         )
 
-        if selected_video and selected_video_type != "Shorts":
-            safe_player_title = html.escape(
-                selected_video["title"]
+        main_short_results = [
+            video
+            for video in videos
+            if video.get("video_type") == "Short"
+        ]
+        main_video_results = [
+            video
+            for video in videos
+            if video.get("video_type") != "Short"
+        ]
+
+        playlists = {
+            "main": (
+                main_video_results
+                if main_video_results
+                else videos
+            ),
+            "main_shorts": main_short_results,
+            "extra_shorts": extra_shorts,
+        }
+
+        selected_playlist = playlists.get(
+            selected_source,
+            videos,
+        )
+
+        if (
+            selected_video
+            and selected_video.get("video_type")
+            == "Short"
+        ):
+            short_playlist = (
+                selected_playlist
+                if selected_playlist
+                else [selected_video]
             )
-            safe_player_channel = html.escape(
-                selected_video["channel"]
-            )
-            duration_text = selected_video.get(
-                "duration_text",
-                "Duration unavailable",
+            start_index = find_video_index(
+                short_playlist,
+                selected_video,
             )
 
-            st.markdown(
-                f"""
-                <div class="youtube-player-box">
-                    <div class="youtube-player-title">
-                        {safe_player_title}
-                    </div>
-                    <div class="youtube-player-meta">
-                        {safe_player_channel} ·
-                        {format_youtube_date(selected_video["published_at"])}
-                        · {duration_text}
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
+            st.markdown("### Now watching")
+            render_shorts_scroll_feed(
+                short_playlist,
+                st.session_state.app_theme,
+                start_index=start_index,
             )
-            st.video(selected_video["url"])
 
-        if videos:
+        elif selected_video:
+            standard_playlist = (
+                selected_playlist
+                if selected_playlist
+                else [selected_video]
+            )
+            st.markdown("### Now watching")
+            render_standard_youtube_player(
+                selected_video,
+                standard_playlist,
+                selected_source,
+            )
+
+        if videos or extra_shorts:
             result_label = html.escape(
                 str(
                     st.session_state.get(
@@ -3794,144 +4372,92 @@ def additional_resources_page() -> None:
                     )
                 )
             )
-            total_results = st.session_state.get(
-                "youtube_watcher_total",
-                0,
-            )
-
-            heading_name = (
-                "Shorts"
-                if selected_video_type == "Shorts"
-                else "Videos"
-            )
-
-            st.markdown(
-                f"### {heading_name} for “{result_label}”"
-            )
-            st.caption(
-                f"Showing {len(videos)} result(s)"
-                + (
-                    f" from approximately {total_results:,} matches."
-                    if total_results
-                    else "."
-                )
-            )
 
             if selected_video_type == "Shorts":
                 st.markdown(
-                    """
-                    <div class="shorts-note">
-                        Scroll inside the Shorts box, use your mouse wheel or
-                        trackpad, or click the ↑ and ↓ buttons to move between Shorts.
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
+                    f"### More Shorts for “{result_label}”"
                 )
-                render_shorts_scroll_feed(
-                    videos,
-                    st.session_state.app_theme,
+                st.caption(
+                    "Click a suggestion below, or scroll and "
+                    "use the arrow buttons in the Shorts viewer."
                 )
+                render_youtube_short_suggestions(
+                    main_short_results,
+                    "main_short_suggestions",
+                    "main_shorts",
+                )
+
+            elif selected_video_type == "Videos":
+                st.markdown(
+                    f"### Suggested videos for “{result_label}”"
+                )
+                render_youtube_video_grid(
+                    main_video_results,
+                    "video_suggestions",
+                    "main",
+                    "main_shorts",
+                )
+
             else:
-                for row_start in range(0, len(videos), 3):
-                    columns = st.columns(3)
-                    row_videos = videos[
-                        row_start:row_start + 3
-                    ]
+                st.markdown(
+                    f"### Top results for “{result_label}”"
+                )
+                render_youtube_video_grid(
+                    videos,
+                    "everything_suggestions",
+                    "main",
+                    "main_shorts",
+                )
 
-                    for offset, (column, video) in enumerate(
-                        zip(columns, row_videos)
-                    ):
-                        result_index = row_start + offset
+                st.divider()
+                st.markdown(
+                    f"### Shorts for “{result_label}”"
+                )
+                st.caption(
+                    "A few shorter results are included "
+                    "separately so they are easier to find."
+                )
 
-                        with column:
-                            with st.container(border=True):
-                                if video["thumbnail"]:
-                                    st.image(
-                                        video["thumbnail"],
-                                        use_container_width=True,
-                                    )
+                shorts_for_everything = (
+                    extra_shorts
+                    if extra_shorts
+                    else main_short_results[:4]
+                )
+                render_youtube_short_suggestions(
+                    shorts_for_everything,
+                    "everything_short_suggestions",
+                    (
+                        "extra_shorts"
+                        if extra_shorts
+                        else "main_shorts"
+                    ),
+                )
 
-                                safe_title = html.escape(
-                                    shorten_text(
-                                        video["title"],
-                                        92,
-                                    )
-                                )
-                                safe_channel = html.escape(
-                                    video["channel"]
-                                )
-                                date_text = format_youtube_date(
-                                    video["published_at"]
-                                )
-                                duration_text = video.get(
-                                    "duration_text",
-                                    "Duration unavailable",
-                                )
-                                type_text = video.get(
-                                    "video_type",
-                                    "Video",
-                                )
-
-                                st.markdown(
-                                    f"""
-                                    <div class="youtube-result-title">
-                                        {safe_title}
-                                    </div>
-                                    <div class="youtube-result-meta">
-                                        {safe_channel}<br>
-                                        {date_text} · {duration_text}
-                                    </div>
-                                    <span class="video-type-badge">
-                                        {type_text}
-                                    </span>
-                                    """,
-                                    unsafe_allow_html=True,
-                                )
-
-                                watch_col, open_col = st.columns(2)
-
-                                with watch_col:
-                                    if st.button(
-                                        "▶ Watch",
-                                        key=(
-                                            "watch_youtube_"
-                                            f"{video['video_id']}_"
-                                            f"{result_index}"
-                                        ),
-                                        use_container_width=True,
-                                    ):
-                                        st.session_state[
-                                            "youtube_watcher_selected"
-                                        ] = video
-                                        st.rerun()
-
-                                with open_col:
-                                    st.link_button(
-                                        "Open ↗",
-                                        video["url"],
-                                        use_container_width=True,
-                                    )
-
-            next_page_token = st.session_state.get(
+            main_next_token = st.session_state.get(
                 "youtube_watcher_next_token",
                 "",
             )
 
-            if next_page_token:
-                spacer_left, more_col, spacer_right = st.columns(
-                    [1.5, 1, 1.5]
+            if main_next_token:
+                left_space, more_col, right_space = (
+                    st.columns([1.5, 1, 1.5])
                 )
 
                 with more_col:
-                    button_label = (
+                    more_label = (
                         "Show more Shorts"
                         if selected_video_type == "Shorts"
-                        else "Show more videos"
+                        else (
+                            "Show more videos"
+                            if selected_video_type == "Videos"
+                            else "Show more results"
+                        )
                     )
 
                     if st.button(
-                        button_label,
+                        more_label,
                         type="primary",
+                        key="youtube_more_main",
                         use_container_width=True,
                     ):
                         try:
@@ -3942,7 +4468,7 @@ def additional_resources_page() -> None:
                                     more_videos,
                                     new_next_token,
                                     total_results,
-                                    resolved_label,
+                                    _,
                                 ) = search_youtube_watcher(
                                     st.session_state[
                                         "youtube_watcher_query"
@@ -3954,43 +4480,105 @@ def additional_resources_page() -> None:
                                     st.session_state[
                                         "youtube_watcher_order"
                                     ],
-                                    st.session_state.get(
-                                        "youtube_watcher_video_type",
-                                        "Everything",
-                                    ),
-                                    page_token=next_page_token,
+                                    selected_video_type,
+                                    page_token=main_next_token,
                                     max_results=12,
                                 )
 
-                            existing_ids = {
+                            st.session_state.youtube_watcher_results = (
+                                unique_youtube_videos(
+                                    videos + more_videos
+                                )
+                            )
+                            st.session_state.youtube_watcher_next_token = (
+                                new_next_token
+                            )
+                            st.session_state.youtube_watcher_total = (
+                                total_results
+                            )
+                            st.rerun()
+
+                        except RuntimeError as error:
+                            st.error(str(error))
+
+            extra_short_token = st.session_state.get(
+                "youtube_watcher_extra_shorts_next",
+                "",
+            )
+
+            if (
+                selected_video_type == "Everything"
+                and extra_short_token
+            ):
+                left_space, shorts_more_col, right_space = (
+                    st.columns([1.5, 1, 1.5])
+                )
+
+                with shorts_more_col:
+                    if st.button(
+                        "Show more Shorts",
+                        key="youtube_more_extra_shorts",
+                        use_container_width=True,
+                    ):
+                        try:
+                            with st.spinner(
+                                "Loading more Shorts..."
+                            ):
+                                (
+                                    more_shorts,
+                                    new_short_token,
+                                    _,
+                                    _,
+                                ) = search_youtube_watcher(
+                                    st.session_state[
+                                        "youtube_watcher_query"
+                                    ],
+                                    youtube_api_key,
+                                    st.session_state[
+                                        "youtube_watcher_mode"
+                                    ],
+                                    st.session_state[
+                                        "youtube_watcher_order"
+                                    ],
+                                    "Shorts",
+                                    page_token=extra_short_token,
+                                    max_results=6,
+                                )
+
+                            existing_main_ids = {
                                 video["video_id"]
                                 for video in videos
                             }
-                            unique_more = [
+                            more_shorts = [
                                 video
-                                for video in more_videos
+                                for video in more_shorts
                                 if video["video_id"]
-                                not in existing_ids
+                                not in existing_main_ids
                             ]
 
-                            st.session_state[
-                                "youtube_watcher_results"
-                            ] = videos + unique_more
-                            st.session_state[
-                                "youtube_watcher_next_token"
-                            ] = new_next_token
-                            st.session_state[
-                                "youtube_watcher_total"
-                            ] = total_results
+                            st.session_state.youtube_watcher_extra_shorts = (
+                                unique_youtube_videos(
+                                    extra_shorts
+                                    + more_shorts
+                                )
+                            )
+                            st.session_state.youtube_watcher_extra_shorts_next = (
+                                new_short_token
+                            )
                             st.rerun()
+
                         except RuntimeError as error:
                             st.error(str(error))
+
         else:
             st.markdown(
                 """
                 <div class="youtube-empty">
-                    <strong>Search for something to watch.</strong><br>
-                    Find lessons, tutorials, creators, videos, or Shorts.
+                    <strong>
+                        Search for something to watch.
+                    </strong><br>
+                    Find lessons, tutorials, creators,
+                    videos, or Shorts.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -4215,6 +4803,7 @@ def additional_resources_page() -> None:
                         tool["url"],
                         use_container_width=True,
                     )
+
 
 
 
