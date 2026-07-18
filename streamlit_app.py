@@ -2785,34 +2785,17 @@ def additional_resources_page() -> None:
         )
         st.markdown("### Recent educational videos")
 
-        st.markdown(
-            """
-            <div class="api-help">
-                <strong>One-time setup:</strong> enter a YouTube Data API key.
-                The key is used only for the current app session unless you place
-                it in Streamlit secrets or the YOUTUBE_API_KEY environment variable.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        youtube_api_key = get_default_youtube_api_key()
 
-        if "youtube_api_key" not in st.session_state:
-            st.session_state.youtube_api_key = (
-                get_default_youtube_api_key()
+        if youtube_api_key:
+            st.success(
+                "YouTube is connected. Recent videos can be loaded below."
             )
-
-        youtube_api_key = st.text_input(
-            "YouTube Data API key",
-            value=st.session_state.youtube_api_key,
-            type="password",
-            placeholder="Paste your API key",
-            help=(
-                "Create a Google Cloud project, enable YouTube Data API v3, "
-                "and create an API key."
-            ),
-        ).strip()
-
-        st.session_state.youtube_api_key = youtube_api_key
+        else:
+            st.error(
+                "YouTube is not connected. Add YOUTUBE_API_KEY to your "
+                "Streamlit app secrets or Codespaces secrets, then restart the app."
+            )
 
         with st.expander(
             "Manage YouTube channels",
@@ -2947,7 +2930,7 @@ def additional_resources_page() -> None:
             if fetch_videos:
                 if not youtube_api_key:
                     st.error(
-                        "Enter a YouTube Data API key first."
+                        "YouTube is not connected. Add YOUTUBE_API_KEY to your app secrets first."
                     )
                 elif not selected_channel_labels:
                     st.error(
