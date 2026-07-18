@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import html
+import json
+import os
 import sqlite3
 import time as time_module
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
@@ -654,6 +659,67 @@ def apply_app_theme(theme_name: str) -> None:
 
 apply_app_theme(st.session_state.app_theme)
 
+st.markdown(
+    """
+    <style>
+        .resource-card,
+        .video-card,
+        .tool-card {
+            padding: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 15px;
+            background: linear-gradient(145deg, var(--card), var(--card-alt));
+            box-shadow: 0 7px 20px var(--shadow);
+            margin-bottom: 0.75rem;
+        }
+
+        .resource-card h4,
+        .video-card h4,
+        .tool-card h4 {
+            color: var(--text);
+            margin: 0 0 0.35rem;
+        }
+
+        .resource-description,
+        .video-description,
+        .tool-description {
+            color: var(--text-soft);
+            font-size: 0.88rem;
+            line-height: 1.45;
+        }
+
+        .video-thumbnail {
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .section-eyebrow {
+            color: var(--accent);
+            font-size: 0.76rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 0.25rem;
+        }
+
+        .api-help {
+            padding: 0.85rem 0.95rem;
+            border-radius: 13px;
+            border: 1px solid var(--border);
+            background: var(--card-alt);
+            color: var(--text-soft);
+            margin-bottom: 0.8rem;
+        }
+
+        .api-help strong {
+            color: var(--text);
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---------------------------------------------------------
 # DATABASE FUNCTIONS
 # ---------------------------------------------------------
@@ -748,6 +814,30 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS settings (
                 setting_key TEXT PRIMARY KEY,
                 setting_value TEXT NOT NULL
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS youtube_channels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_name TEXT NOT NULL,
+                channel_reference TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS study_resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                resource_url TEXT NOT NULL,
+                category TEXT NOT NULL,
+                notes TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -1120,6 +1210,403 @@ def get_recent_focus_sessions(limit: int = 6) -> list[dict]:
 
     return [dict(row) for row in rows]
 
+
+# ---------------------------------------------------------
+# ADDITIONAL RESOURCES FUNCTIONS
+# ---------------------------------------------------------
+
+def normalize_youtube_channel_reference(reference: str) -> str | None:
+    value = reference.strip().rstrip("/")
+
+    if not value:
+        return None
+
+    if "youtube.com" in value:
+        parsed = urllib.parse.urlparse(
+            value if "://" in value else f"https://{value}"
+        )
+        path_parts = [
+            part for part in parsed.path.split("/") if part
+        ]
+
+        if not path_parts:
+            return None
+
+        if path_parts[0].startswith("@"):
+            return path_parts[0]
+
+        if (
+            path_parts[0] == "channel"
+            and len(path_parts) >= 2
+        ):
+            return path_parts[1]
+
+        return None
+
+    if value.startswith("@"):
+        return value
+
+    if value.startswith("UC") and len(value) >= 20:
+        return value
+
+    if " " not in value:
+        return f"@{value.lstrip('@')}"
+
+    return None
+
+
+def add_youtube_channel(
+    channel_name: str,
+    channel_reference: str,
+) -> tuple[bool, str]:
+    normalized = normalize_youtube_channel_reference(
+        channel_reference
+    )
+
+    if not normalized:
+        return (
+            False,
+            "Use an @handle, a channel URL, or a channel ID beginning with UC.",
+        )
+
+    try:
+        with connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO youtube_channels (
+                    channel_name,
+                    channel_reference,
+                    created_at
+                )
+                VALUES (?, ?, ?)
+                """,
+                (
+                    channel_name.strip(),
+                    normalized,
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+    except sqlite3.IntegrityError:
+        return False, "That YouTube channel is already saved."
+
+    return True, "YouTube channel added."
+
+
+def get_youtube_channels() -> list[dict]:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM youtube_channels
+            ORDER BY channel_name COLLATE NOCASE
+            """
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def delete_youtube_channel(channel_id: int) -> None:
+    with connect() as connection:
+        connection.execute(
+            "DELETE FROM youtube_channels WHERE id = ?",
+            (channel_id,),
+        )
+
+
+def add_study_resource(
+    title: str,
+    resource_url: str,
+    category: str,
+    notes: str,
+) -> tuple[bool, str]:
+    clean_url = resource_url.strip()
+
+    if not clean_url.startswith(("https://", "http://")):
+        return False, "The resource URL must begin with https:// or http://."
+
+    with connect() as connection:
+        connection.execute(
+            """
+            INSERT INTO study_resources (
+                title,
+                resource_url,
+                category,
+                notes,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                title.strip(),
+                clean_url,
+                category,
+                notes.strip(),
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+
+    return True, "Resource saved."
+
+
+def get_study_resources() -> list[dict]:
+    with connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT *
+            FROM study_resources
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def delete_study_resource(resource_id: int) -> None:
+    with connect() as connection:
+        connection.execute(
+            "DELETE FROM study_resources WHERE id = ?",
+            (resource_id,),
+        )
+
+
+def get_default_youtube_api_key() -> str:
+    environment_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+
+    if environment_key:
+        return environment_key
+
+    try:
+        secret_key = str(
+            st.secrets.get("YOUTUBE_API_KEY", "")
+        ).strip()
+    except Exception:
+        secret_key = ""
+
+    return secret_key
+
+
+def youtube_api_request(
+    endpoint: str,
+    parameters: dict,
+    api_key: str,
+) -> dict:
+    request_parameters = dict(parameters)
+    request_parameters["key"] = api_key
+
+    query_string = urllib.parse.urlencode(
+        request_parameters,
+        doseq=True,
+    )
+    request_url = (
+        f"https://www.googleapis.com/youtube/v3/{endpoint}"
+        f"?{query_string}"
+    )
+
+    request = urllib.request.Request(
+        request_url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "StudyFlow/1.0",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(
+            request,
+            timeout=12,
+        ) as response:
+            return json.loads(
+                response.read().decode("utf-8")
+            )
+    except urllib.error.HTTPError as error:
+        try:
+            error_payload = json.loads(
+                error.read().decode("utf-8")
+            )
+            message = (
+                error_payload.get("error", {})
+                .get("message", "YouTube API request failed.")
+            )
+        except Exception:
+            message = "YouTube API request failed."
+
+        raise RuntimeError(message) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(
+            "Could not connect to YouTube. Check your internet connection."
+        ) from error
+
+
+def resolve_youtube_channel(
+    channel: dict,
+    api_key: str,
+) -> dict:
+    reference = channel["channel_reference"]
+
+    parameters = {
+        "part": "snippet,contentDetails",
+        "maxResults": 1,
+    }
+
+    if reference.startswith("UC"):
+        parameters["id"] = reference
+    else:
+        parameters["forHandle"] = reference
+
+    payload = youtube_api_request(
+        "channels",
+        parameters,
+        api_key,
+    )
+    items = payload.get("items", [])
+
+    if not items:
+        raise RuntimeError(
+            f"No YouTube channel was found for {reference}."
+        )
+
+    item = items[0]
+    uploads_playlist = (
+        item.get("contentDetails", {})
+        .get("relatedPlaylists", {})
+        .get("uploads")
+    )
+
+    if not uploads_playlist:
+        raise RuntimeError(
+            f"The uploads playlist for {reference} could not be found."
+        )
+
+    return {
+        "saved_id": channel["id"],
+        "display_name": channel["channel_name"],
+        "official_name": (
+            item.get("snippet", {}).get("title")
+            or channel["channel_name"]
+        ),
+        "uploads_playlist": uploads_playlist,
+    }
+
+
+def get_recent_youtube_videos(
+    channels: list[dict],
+    api_key: str,
+    videos_per_channel: int,
+) -> tuple[list[dict], list[str]]:
+    videos: list[dict] = []
+    errors: list[str] = []
+
+    for channel in channels:
+        try:
+            resolved = resolve_youtube_channel(
+                channel,
+                api_key,
+            )
+
+            payload = youtube_api_request(
+                "playlistItems",
+                {
+                    "part": "snippet,contentDetails",
+                    "playlistId": resolved["uploads_playlist"],
+                    "maxResults": videos_per_channel,
+                },
+                api_key,
+            )
+
+            for item in payload.get("items", []):
+                snippet = item.get("snippet", {})
+                video_id = (
+                    item.get("contentDetails", {}).get("videoId")
+                    or snippet.get("resourceId", {}).get("videoId")
+                )
+
+                title = snippet.get("title", "").strip()
+
+                if (
+                    not video_id
+                    or not title
+                    or title in {"Private video", "Deleted video"}
+                ):
+                    continue
+
+                thumbnails = snippet.get("thumbnails", {})
+                thumbnail_url = ""
+
+                for size in ("high", "medium", "default"):
+                    if thumbnails.get(size, {}).get("url"):
+                        thumbnail_url = thumbnails[size]["url"]
+                        break
+
+                videos.append(
+                    {
+                        "video_id": video_id,
+                        "title": title,
+                        "channel": (
+                            snippet.get("videoOwnerChannelTitle")
+                            or resolved["official_name"]
+                        ),
+                        "published_at": snippet.get(
+                            "publishedAt",
+                            "",
+                        ),
+                        "description": snippet.get(
+                            "description",
+                            "",
+                        ),
+                        "thumbnail": thumbnail_url,
+                        "url": (
+                            "https://www.youtube.com/watch"
+                            f"?v={video_id}"
+                        ),
+                    }
+                )
+
+        except RuntimeError as error:
+            errors.append(
+                f"{channel['channel_name']}: {error}"
+            )
+
+    videos.sort(
+        key=lambda video: video["published_at"],
+        reverse=True,
+    )
+
+    return videos, errors
+
+
+def format_youtube_date(published_at: str) -> str:
+    if not published_at:
+        return "Publication date unavailable"
+
+    try:
+        published = datetime.fromisoformat(
+            published_at.replace("Z", "+00:00")
+        )
+        now = datetime.now(published.tzinfo)
+        difference = now - published
+
+        if difference.days == 0:
+            hours = max(1, difference.seconds // 3600)
+            return f"{hours} hour(s) ago"
+
+        if difference.days == 1:
+            return "Yesterday"
+
+        if difference.days < 30:
+            return f"{difference.days} days ago"
+
+        return published.strftime("%b %d, %Y")
+    except ValueError:
+        return published_at
+
+
+def shorten_text(value: str, maximum: int = 180) -> str:
+    cleaned = " ".join(value.split())
+
+    if len(cleaned) <= maximum:
+        return cleaned
+
+    return cleaned[: maximum - 1].rstrip() + "…"
 
 # ---------------------------------------------------------
 # SMART PLANNER LOGIC
@@ -2276,6 +2763,526 @@ def study_plan_page(
 
 
 
+def additional_resources_page() -> None:
+    st.subheader("Additional Resources")
+    st.caption(
+        "Follow educational YouTube channels, save useful links, "
+        "and open trusted study tools from one place."
+    )
+
+    youtube_tab, saved_tab, tools_tab = st.tabs(
+        [
+            "📺 Recent YouTube Videos",
+            "🔖 My Resources",
+            "🧰 Study Tools",
+        ]
+    )
+
+    with youtube_tab:
+        st.markdown(
+            '<div class="section-eyebrow">Selected channels</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("### Recent educational videos")
+
+        st.markdown(
+            """
+            <div class="api-help">
+                <strong>One-time setup:</strong> enter a YouTube Data API key.
+                The key is used only for the current app session unless you place
+                it in Streamlit secrets or the YOUTUBE_API_KEY environment variable.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if "youtube_api_key" not in st.session_state:
+            st.session_state.youtube_api_key = (
+                get_default_youtube_api_key()
+            )
+
+        youtube_api_key = st.text_input(
+            "YouTube Data API key",
+            value=st.session_state.youtube_api_key,
+            type="password",
+            placeholder="Paste your API key",
+            help=(
+                "Create a Google Cloud project, enable YouTube Data API v3, "
+                "and create an API key."
+            ),
+        ).strip()
+
+        st.session_state.youtube_api_key = youtube_api_key
+
+        with st.expander(
+            "Manage YouTube channels",
+            expanded=not bool(get_youtube_channels()),
+        ):
+            with st.form(
+                "add_youtube_channel_form",
+                clear_on_submit=True,
+            ):
+                channel_col, reference_col = st.columns(2)
+
+                with channel_col:
+                    channel_name = st.text_input(
+                        "Channel label",
+                        placeholder="Example: Khan Academy",
+                    )
+
+                with reference_col:
+                    channel_reference = st.text_input(
+                        "Channel @handle, URL, or ID",
+                        placeholder="@KhanAcademy",
+                    )
+
+                add_channel_button = st.form_submit_button(
+                    "Add channel",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if add_channel_button:
+                if (
+                    not channel_name.strip()
+                    or not channel_reference.strip()
+                ):
+                    st.error(
+                        "Enter both a channel label and channel reference."
+                    )
+                else:
+                    success, message = add_youtube_channel(
+                        channel_name,
+                        channel_reference,
+                    )
+
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+
+            saved_channels = get_youtube_channels()
+
+            if saved_channels:
+                channel_rows = [
+                    {
+                        "Channel": channel["channel_name"],
+                        "Reference": channel["channel_reference"],
+                    }
+                    for channel in saved_channels
+                ]
+
+                st.dataframe(
+                    pd.DataFrame(channel_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                delete_options = {
+                    (
+                        f"{channel['channel_name']} "
+                        f"({channel['channel_reference']})"
+                    ): channel["id"]
+                    for channel in saved_channels
+                }
+
+                delete_col, button_col = st.columns([2, 1])
+
+                with delete_col:
+                    delete_channel_label = st.selectbox(
+                        "Remove a channel",
+                        list(delete_options.keys()),
+                        key="delete_channel_selector",
+                    )
+
+                with button_col:
+                    st.write("")
+                    st.write("")
+
+                    if st.button(
+                        "Remove channel",
+                        use_container_width=True,
+                    ):
+                        delete_youtube_channel(
+                            delete_options[delete_channel_label]
+                        )
+                        st.success("Channel removed.")
+                        st.rerun()
+
+        channels = get_youtube_channels()
+
+        if not channels:
+            st.info(
+                "Add at least one educational YouTube channel "
+                "to display recent uploads."
+            )
+        else:
+            channel_lookup = {
+                (
+                    f"{channel['channel_name']} "
+                    f"({channel['channel_reference']})"
+                ): channel
+                for channel in channels
+            }
+
+            selected_channel_labels = st.multiselect(
+                "Channels to include",
+                list(channel_lookup.keys()),
+                default=list(channel_lookup.keys()),
+            )
+
+            videos_per_channel = st.select_slider(
+                "Videos per channel",
+                options=[1, 2, 3, 4, 5],
+                value=3,
+            )
+
+            fetch_videos = st.button(
+                "Refresh recent videos",
+                type="primary",
+                use_container_width=True,
+            )
+
+            if fetch_videos:
+                if not youtube_api_key:
+                    st.error(
+                        "Enter a YouTube Data API key first."
+                    )
+                elif not selected_channel_labels:
+                    st.error(
+                        "Select at least one channel."
+                    )
+                else:
+                    selected_channels = [
+                        channel_lookup[label]
+                        for label in selected_channel_labels
+                    ]
+
+                    with st.spinner(
+                        "Loading recent channel uploads..."
+                    ):
+                        videos, errors = get_recent_youtube_videos(
+                            selected_channels,
+                            youtube_api_key,
+                            videos_per_channel,
+                        )
+
+                    st.session_state.recent_youtube_videos = videos
+                    st.session_state.youtube_video_errors = errors
+
+            videos = st.session_state.get(
+                "recent_youtube_videos",
+                [],
+            )
+            video_errors = st.session_state.get(
+                "youtube_video_errors",
+                [],
+            )
+
+            for error_message in video_errors:
+                st.warning(error_message)
+
+            if videos:
+                video_options = {
+                    (
+                        f"{video['title']} — {video['channel']}"
+                    ): video
+                    for video in videos
+                }
+
+                selected_video_label = st.selectbox(
+                    "Watch inside StudyFlow",
+                    list(video_options.keys()),
+                )
+                selected_video = video_options[
+                    selected_video_label
+                ]
+
+                st.video(selected_video["url"])
+
+                st.divider()
+                st.markdown("### Latest uploads")
+
+                for index in range(0, len(videos), 2):
+                    columns = st.columns(2)
+
+                    for column, video in zip(
+                        columns,
+                        videos[index:index + 2],
+                    ):
+                        with column:
+                            if video["thumbnail"]:
+                                st.image(
+                                    video["thumbnail"],
+                                    use_container_width=True,
+                                )
+
+                            safe_title = html.escape(
+                                video["title"]
+                            )
+                            safe_channel = html.escape(
+                                video["channel"]
+                            )
+                            safe_description = html.escape(
+                                shorten_text(
+                                    video["description"]
+                                )
+                            )
+                            published_text = format_youtube_date(
+                                video["published_at"]
+                            )
+
+                            st.markdown(
+                                f"""
+                                <div class="video-card">
+                                    <h4>{safe_title}</h4>
+                                    <div class="resource-description">
+                                        <strong>{safe_channel}</strong> ·
+                                        {published_text}
+                                    </div>
+                                    <div class="video-description"
+                                         style="margin-top:0.45rem;">
+                                        {safe_description or "No description available."}
+                                    </div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                            st.link_button(
+                                "Open on YouTube",
+                                video["url"],
+                                use_container_width=True,
+                            )
+            elif youtube_api_key:
+                st.info(
+                    "Press “Refresh recent videos” to load the latest uploads."
+                )
+
+    with saved_tab:
+        st.markdown(
+            '<div class="section-eyebrow">Personal library</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("### Save useful study resources")
+
+        with st.form(
+            "add_study_resource_form",
+            clear_on_submit=True,
+        ):
+            resource_left, resource_right = st.columns(2)
+
+            with resource_left:
+                resource_title = st.text_input(
+                    "Resource title",
+                    placeholder="Example: Algebra practice problems",
+                )
+                resource_url = st.text_input(
+                    "Resource URL",
+                    placeholder="https://...",
+                )
+
+            with resource_right:
+                resource_category = st.selectbox(
+                    "Category",
+                    [
+                        "Website",
+                        "Video",
+                        "Article",
+                        "Practice",
+                        "Reference",
+                        "Other",
+                    ],
+                )
+                resource_notes = st.text_area(
+                    "Notes",
+                    placeholder="Why this resource is useful...",
+                    height=96,
+                )
+
+            save_resource_button = st.form_submit_button(
+                "Save resource",
+                type="primary",
+                use_container_width=True,
+            )
+
+        if save_resource_button:
+            if (
+                not resource_title.strip()
+                or not resource_url.strip()
+            ):
+                st.error(
+                    "Enter both a title and URL."
+                )
+            else:
+                success, message = add_study_resource(
+                    resource_title,
+                    resource_url,
+                    resource_category,
+                    resource_notes,
+                )
+
+                if success:
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.error(message)
+
+        resources = get_study_resources()
+
+        if not resources:
+            st.info(
+                "Your saved resource library is empty."
+            )
+        else:
+            category_options = ["All categories"] + sorted(
+                {resource["category"] for resource in resources}
+            )
+
+            resource_category_filter = st.selectbox(
+                "Filter resources",
+                category_options,
+            )
+
+            filtered_resources = resources
+
+            if resource_category_filter != "All categories":
+                filtered_resources = [
+                    resource
+                    for resource in resources
+                    if resource["category"]
+                    == resource_category_filter
+                ]
+
+            for resource in filtered_resources:
+                safe_title = html.escape(resource["title"])
+                safe_category = html.escape(
+                    resource["category"]
+                )
+                safe_notes = html.escape(
+                    resource["notes"]
+                    or "No notes were added."
+                )
+
+                st.markdown(
+                    f"""
+                    <div class="resource-card">
+                        <h4>{safe_title}</h4>
+                        <span class="badge teal">{safe_category}</span>
+                        <div class="resource-description"
+                             style="margin-top:0.55rem;">
+                            {safe_notes}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                open_col, delete_col = st.columns([3, 1])
+
+                with open_col:
+                    st.link_button(
+                        "Open resource",
+                        resource["resource_url"],
+                        use_container_width=True,
+                    )
+
+                with delete_col:
+                    if st.button(
+                        "Delete",
+                        key=f"delete_resource_{resource['id']}",
+                        use_container_width=True,
+                    ):
+                        delete_study_resource(
+                            resource["id"]
+                        )
+                        st.success("Resource deleted.")
+                        st.rerun()
+
+    with tools_tab:
+        st.markdown(
+            '<div class="section-eyebrow">Quick access</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("### Useful study tools")
+
+        study_tools = [
+            {
+                "name": "Khan Academy",
+                "description": (
+                    "Lessons and practice across mathematics, "
+                    "science, computing, economics, and more."
+                ),
+                "url": "https://www.khanacademy.org/",
+            },
+            {
+                "name": "Desmos",
+                "description": (
+                    "Graphing calculator and interactive "
+                    "mathematics tools."
+                ),
+                "url": "https://www.desmos.com/calculator",
+            },
+            {
+                "name": "WolframAlpha",
+                "description": (
+                    "Computational answers, formulas, graphs, "
+                    "and step-based mathematical exploration."
+                ),
+                "url": "https://www.wolframalpha.com/",
+            },
+            {
+                "name": "Quizlet",
+                "description": (
+                    "Flashcards and study sets for vocabulary, "
+                    "definitions, and review."
+                ),
+                "url": "https://quizlet.com/",
+            },
+            {
+                "name": "Google Scholar",
+                "description": (
+                    "Search scholarly articles, books, papers, "
+                    "and academic sources."
+                ),
+                "url": "https://scholar.google.com/",
+            },
+            {
+                "name": "Project Gutenberg",
+                "description": (
+                    "A large collection of free public-domain "
+                    "ebooks and classic literature."
+                ),
+                "url": "https://www.gutenberg.org/",
+            },
+        ]
+
+        for index in range(0, len(study_tools), 2):
+            columns = st.columns(2)
+
+            for column, tool in zip(
+                columns,
+                study_tools[index:index + 2],
+            ):
+                with column:
+                    st.markdown(
+                        f"""
+                        <div class="tool-card">
+                            <h4>{html.escape(tool["name"])}</h4>
+                            <div class="tool-description">
+                                {html.escape(tool["description"])}
+                            </div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.link_button(
+                        f"Open {tool['name']}",
+                        tool["url"],
+                        use_container_width=True,
+                    )
+
 # ---------------------------------------------------------
 # MAIN APP
 # ---------------------------------------------------------
@@ -2324,6 +3331,7 @@ with st.sidebar:
             "✅ My Tasks",
             "⏱️ Focus Timer",
             "🗓️ Study Plan",
+            "📚 Additional Resources",
         ],
         label_visibility="collapsed",
     )
@@ -2356,5 +3364,7 @@ elif page == "✅ My Tasks":
     my_tasks_page(tasks)
 elif page == "⏱️ Focus Timer":
     focus_timer_page(tasks)
-else:
+elif page == "🗓️ Study Plan":
     study_plan_page(tasks, availability)
+else:
+    additional_resources_page()
