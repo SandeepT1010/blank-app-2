@@ -9880,5 +9880,3 @@ elif page == "🗓️ Study Plan":
     study_plan_page(tasks, availability)
 else:
     additional_resources_page()
-
-render_persistent_music_overlay()
