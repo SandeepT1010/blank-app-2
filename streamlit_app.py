@@ -795,10 +795,16 @@ def apply_app_theme(theme_name: str) -> None:
         }
 
         .brand-logo {
-            width: 3.15rem;
-            height: 3.15rem;
-            flex: 0 0 auto;
+            display: block;
+            width: 3.15rem !important;
+            height: 3.15rem !important;
+            min-width: 3.15rem !important;
+            min-height: 3.15rem !important;
+            max-width: 3.15rem !important;
+            max-height: 3.15rem !important;
+            flex: 0 0 3.15rem;
             object-fit: contain;
+            overflow: hidden;
             filter: drop-shadow(
                 0 7px 12px rgba(0, 0, 0, 0.22)
             );
@@ -829,79 +835,6 @@ def apply_app_theme(theme_name: str) -> None:
             letter-spacing: 0.04em;
             margin: 0.2rem 0 0.35rem;
             text-transform: uppercase;
-        }
-
-        .fruit-theme-picker {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 0.55rem;
-            margin: 0.15rem 0 0.6rem;
-        }
-
-        .fruit-theme-choice {
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            aspect-ratio: 1 / 1;
-            padding: 0.28rem;
-            overflow: hidden;
-            border: 2px solid transparent;
-            border-radius: 16px;
-            background: var(--card-alt);
-            box-shadow: 0 7px 18px var(--shadow);
-            transition:
-                transform 150ms ease,
-                border-color 150ms ease,
-                background 150ms ease,
-                box-shadow 150ms ease;
-        }
-
-        .fruit-theme-choice:hover {
-            transform: translateY(-2px) scale(1.025);
-            border-color: var(--border-strong);
-            background: var(--card-hover);
-            box-shadow: 0 10px 24px var(--shadow);
-        }
-
-        .fruit-theme-choice:focus-visible {
-            outline: 3px solid var(--accent);
-            outline-offset: 2px;
-        }
-
-        .fruit-theme-choice.selected {
-            border-color: var(--accent);
-            background: var(--card-hover);
-            box-shadow:
-                0 0 0 3px var(--border),
-                0 10px 24px var(--shadow);
-        }
-
-        .fruit-theme-choice img {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            pointer-events: none;
-            user-select: none;
-        }
-
-        .fruit-theme-choice.selected::after {
-            content: "✓";
-            position: absolute;
-            right: 0.3rem;
-            bottom: 0.3rem;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 1.35rem;
-            height: 1.35rem;
-            border-radius: 999px;
-            color: var(--accent-text);
-            background: var(--accent);
-            font-size: 0.78rem;
-            font-weight: 900;
-            box-shadow: 0 3px 8px var(--shadow);
         }
 
         /* Clean sidebar navigation */
@@ -972,10 +905,16 @@ def apply_app_theme(theme_name: str) -> None:
         }
 
         .hero-logo {
-            width: 5rem;
-            height: 5rem;
-            flex: 0 0 auto;
+            display: block;
+            width: 5rem !important;
+            height: 5rem !important;
+            min-width: 5rem !important;
+            min-height: 5rem !important;
+            max-width: 5rem !important;
+            max-height: 5rem !important;
+            flex: 0 0 5rem;
             object-fit: contain;
+            overflow: hidden;
             filter: drop-shadow(
                 0 10px 20px var(--shadow)
             );
@@ -9601,6 +9540,242 @@ def additional_resources_page() -> None:
 
 
 
+def render_theme_fruit_selector() -> None:
+    """
+    Render the three clickable fruits inside a fixed-height iframe.
+
+    Keeping the selector in its own small component prevents Base64
+    images from expanding outside the Streamlit sidebar.
+    """
+
+    selected_flavor = st.session_state.get(
+        "theme_flavor",
+        "red_white",
+    )
+
+    fruit_items = []
+
+    for flavor_key in (
+        "yellow_white",
+        "red_white",
+        "red_red",
+    ):
+        selected_class = (
+            " selected"
+            if flavor_key == selected_flavor
+            else ""
+        )
+        accessible_label = html.escape(
+            THEME_FLAVOR_LABELS[
+                flavor_key
+            ],
+            quote=True,
+        )
+        image_source = html.escape(
+            THEME_FRUIT_DATA_URIS[
+                flavor_key
+            ],
+            quote=True,
+        )
+
+        fruit_items.append(
+            f"""
+            <button
+                class="fruit{selected_class}"
+                type="button"
+                data-theme="{flavor_key}"
+                aria-label="{accessible_label}"
+                title="{accessible_label}">
+                <img
+                    src="{image_source}"
+                    alt="{accessible_label}">
+                <span class="check">✓</span>
+            </button>
+            """
+        )
+
+    component_markup = (
+        """
+        <!doctype html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta
+                name="viewport"
+                content="width=device-width, initial-scale=1"
+            >
+            <style>
+                :root {
+                    color-scheme: dark light;
+                }
+
+                * {
+                    box-sizing: border-box;
+                }
+
+                html,
+                body {
+                    width: 100%;
+                    height: 82px;
+                    min-height: 82px;
+                    max-height: 82px;
+                    margin: 0;
+                    padding: 0;
+                    overflow: hidden;
+                    background: transparent;
+                }
+
+                body {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-family:
+                        Arial,
+                        Helvetica,
+                        sans-serif;
+                }
+
+                .picker {
+                    display: grid;
+                    grid-template-columns:
+                        repeat(3, minmax(0, 58px));
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                    width: 100%;
+                    height: 76px;
+                    max-width: 198px;
+                    margin: 0 auto;
+                    overflow: hidden;
+                }
+
+                .fruit {
+                    position: relative;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 58px;
+                    min-width: 58px;
+                    max-width: 58px;
+                    height: 58px;
+                    min-height: 58px;
+                    max-height: 58px;
+                    padding: 3px;
+                    overflow: hidden;
+                    border: 2px solid transparent;
+                    border-radius: 15px;
+                    background:
+                        rgba(255, 255, 255, 0.07);
+                    box-shadow:
+                        0 5px 14px rgba(0, 0, 0, 0.22);
+                    cursor: pointer;
+                    appearance: none;
+                    -webkit-appearance: none;
+                    transition:
+                        transform 140ms ease,
+                        border-color 140ms ease,
+                        background 140ms ease;
+                }
+
+                .fruit:hover {
+                    transform: translateY(-2px);
+                    border-color:
+                        rgba(255, 255, 255, 0.55);
+                    background:
+                        rgba(255, 255, 255, 0.13);
+                }
+
+                .fruit:focus-visible {
+                    outline: 3px solid #ffffff;
+                    outline-offset: 1px;
+                }
+
+                .fruit.selected {
+                    border-color: #ffffff;
+                    background:
+                        rgba(255, 255, 255, 0.16);
+                }
+
+                .fruit img {
+                    display: block;
+                    width: 48px !important;
+                    min-width: 48px !important;
+                    max-width: 48px !important;
+                    height: 48px !important;
+                    min-height: 48px !important;
+                    max-height: 48px !important;
+                    object-fit: contain;
+                    pointer-events: none;
+                    user-select: none;
+                }
+
+                .check {
+                    position: absolute;
+                    right: 2px;
+                    bottom: 2px;
+                    display: none;
+                    align-items: center;
+                    justify-content: center;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 999px;
+                    color: #ffffff;
+                    background: #111111;
+                    font-size: 10px;
+                    font-weight: 900;
+                    line-height: 1;
+                    pointer-events: none;
+                }
+
+                .fruit.selected .check {
+                    display: inline-flex;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="picker">
+        """
+        + "".join(fruit_items)
+        + """
+            </div>
+
+            <script>
+                document
+                    .querySelectorAll(".fruit")
+                    .forEach((button) => {
+                        button.addEventListener(
+                            "click",
+                            () => {
+                                const theme =
+                                    button.dataset.theme;
+                                const parentUrl =
+                                    new URL(
+                                        window.parent
+                                        .location.href
+                                    );
+
+                                parentUrl.searchParams.set(
+                                    "fruit_theme",
+                                    theme
+                                );
+
+                                window.parent.location.href =
+                                    parentUrl.toString();
+                            }
+                        );
+                    });
+            </script>
+        </body>
+        </html>
+        """
+    )
+
+    components.html(
+        component_markup,
+        height=82,
+        scrolling=False,
+    )
+
 # ---------------------------------------------------------
 # MAIN APP
 # ---------------------------------------------------------
@@ -9656,53 +9831,7 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    fruit_theme_links = []
-
-    for flavor_key in (
-        "yellow_white",
-        "red_white",
-        "red_red",
-    ):
-        selected_class = (
-            " selected"
-            if st.session_state.theme_flavor
-            == flavor_key
-            else ""
-        )
-        accessible_label = html.escape(
-            THEME_FLAVOR_LABELS[
-                flavor_key
-            ],
-            quote=True,
-        )
-        image_source = html.escape(
-            THEME_FRUIT_DATA_URIS[
-                flavor_key
-            ],
-            quote=True,
-        )
-
-        fruit_theme_links.append(
-            f"""
-            <a
-                class="fruit-theme-choice{selected_class}"
-                href="?fruit_theme={flavor_key}"
-                target="_self"
-                aria-label="{accessible_label}"
-                title="{accessible_label}">
-                <img
-                    src="{image_source}"
-                    alt="{accessible_label}">
-            </a>
-            """
-        )
-
-    st.markdown(
-        '<div class="fruit-theme-picker">'
-        + "".join(fruit_theme_links)
-        + "</div>",
-        unsafe_allow_html=True,
-    )
+    render_theme_fruit_selector()
 
     st.divider()
 
